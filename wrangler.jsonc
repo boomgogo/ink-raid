@@ -1,0 +1,17 @@
+// Cloudflare Workers, static assets only: no Worker script runs, Cloudflare
+// serves dist/ straight from its edge and compresses it on the way out.
+//
+//   npm run deploy     builds, then uploads dist/
+//   npm run cf:dev     serves the built dist/ the way Cloudflare will
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ink-raid",
+  "compatibility_date": "2026-09-25",
+  "assets": {
+    "directory": "./dist"
+  },
+  "preview_urls": false,
+  "observability": {
+    "enabled": true
+  }
+}

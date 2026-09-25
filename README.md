@@ -21,6 +21,18 @@ npm run build
 npm run preview    # http://localhost:4173
 ```
 
+## Deploy
+
+It deploys to Cloudflare Workers as static assets (`wrangler.jsonc`): no server code, just `dist/`
+served from Cloudflare's edge. `public/_headers` caches the hashed files in `dist/assets/` for a
+year, so a returning player loads straight from cache.
+
+```bash
+npx wrangler login # once
+npm run cf:dev     # the build, served locally by the Cloudflare runtime: http://localhost:8787
+npm run deploy     # build and upload; prints the https://ink-raid.<account>.workers.dev URL
+```
+
 ## Controls
 
 Keyboard and mouse. The keys can't be rebound yet.

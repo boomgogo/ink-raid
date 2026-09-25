@@ -1,0 +1,12 @@
+# Cloudflare static-asset headers, copied into dist/ by the build.
+#
+# Vite names everything under /assets/ by its content hash, so a file there
+# never changes: a returning player loads the game from cache, with no
+# revalidation round trips. index.html keeps Cloudflare's default (revalidate),
+# so a new deploy is picked up on the next visit.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# The font is not hashed; a week, then revalidate.
+/fonts/*
+  Cache-Control: public, max-age=604800

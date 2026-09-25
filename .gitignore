@@ -169,3 +169,6 @@ npm-debug.log*
 # screenshots and videos written by the test tools
 shots/
 
+
+# wrangler local state
+.wrangler/

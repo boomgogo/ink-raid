@@ -1,0 +1,37 @@
+{
+  "name": "ink-raid",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 4173",
+    "compare": "node tools/compare.mjs",
+    "shots": "node tools/shots.mjs",
+    "sheet": "node tools/sheet.mjs",
+    "feel": "node tools/feel.mjs",
+    "play": "node tools/play.mjs",
+    "game": "node tools/game.mjs",
+    "perf": "node tools/perf.mjs",
+    "gate": "node tools/compare.mjs gate",
+    "touch": "node tools/touch.mjs",
+    "figures": "node tools/figures.mjs",
+    "collide": "node tools/collide.mjs",
+    "reach": "node tools/reach.mjs",
+    "distcheck": "node tools/distcheck.mjs",
+    "toys": "node tools/toys.mjs",
+    "render": "node tools/render.mjs"
+  },
+  "dependencies": {
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0",
+    "playwright": "^1.49.0",
+    "pngjs": "^7.0.0"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true
+  }
+}

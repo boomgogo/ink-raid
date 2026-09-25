@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Ink Raid</title>
+<meta name="description" content="A first-person shooter on a desk, drawn in pen: the ink has climbed off the page.">
+<link rel="preload" href="/fonts/kalam-latin.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+  /* Kalam is self-hosted, not pulled from Google Fonts: the stylesheet request
+     and the font request behind it are two cross-origin round trips sitting on
+     the critical path, and cutting them is most of the gap between the old
+     2.4 s load and the 1-2 s time-to-interaction target. SIL OFL 1.1, see
+     public/fonts/LICENSE.txt. */
+  @font-face {
+    font-family: 'Kalam';
+    src: url('/fonts/kalam-latin.woff2') format('woff2');
+    font-weight: 400; font-style: normal; font-display: swap;
+  }
+  /* Critical only: the desk colour has to be up before the first frame or the
+     page flashes white, and these three MUST equal src/render/palette.js —
+     tools/compare.mjs measures paper, pen and danger straight off the pixels. */
+  :root {
+    --ir-paper: #f2f1ec;
+    --ir-pen: #131318;
+    --ir-danger: #cc1a38;
+    color-scheme: light;
+    background-color: var(--ir-paper);
+  }
+  html { height: 100%; }
+  body {
+    margin: 0; min-height: 100%;
+    overflow: hidden;
+    font-family: 'Kalam', 'Comic Sans MS', 'Segoe Print', cursive;
+    color: var(--ir-pen);
+  }
+  /* The canvas, the overlay and the splash each cover the window by its four
+     edges. */
+  #c, #hud, #boot { position: fixed; top: 0; right: 0; bottom: 0; left: 0; }
+  #c { width: 100%; height: 100%; display: block; touch-action: none; }
+  /* The overlay every HUD element and screen lives in. Never a click target of
+     its own: the game underneath keeps the pointer unless a modal screen says
+     otherwise. */
+  #hud { pointer-events: none; -webkit-user-select: none; user-select: none; overflow: hidden; }
+  #boot {
+    display: grid; place-content: center;
+    background-color: var(--ir-paper);
+    font-size: clamp(18px, 4vw, 30px);
+    letter-spacing: 0.05em;
+    rotate: -0.6deg;
+    transition: opacity .35s ease;
+  }
+  #boot.gone { opacity: 0; pointer-events: none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"></div>
+<div id="boot">setting up the desk&hellip;</div>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>

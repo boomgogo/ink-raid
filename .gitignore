@@ -141,3 +141,31 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+
+
+# dependencies and build output
+node_modules/
+dist/
+.vite/
+vite.config.js.timestamp-*
+*.tsbuildinfo
+
+# logs
+logs
+*.log
+npm-debug.log*
+
+# environment
+.env
+.env.*
+!.env.example
+
+# editors and OS
+.DS_Store
+.vscode/
+.idea/
+
+# screenshots and videos written by the test tools
+shots/
+

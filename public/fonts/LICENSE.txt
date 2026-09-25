@@ -1,0 +1,6 @@
+Kalam — Copyright (c) 2014, Indian Type Foundry.
+Licensed under the SIL Open Font License, Version 1.1: the full text is in OFL.txt.
+
+Self-hosted here (latin subset only) rather than loaded from Google Fonts: the
+cross-origin CSS request and the font request behind it add two round trips to
+the critical path.

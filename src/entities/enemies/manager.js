@@ -49,6 +49,16 @@ const STEER = 40;
 // Wedged against a wall this long, it steps sideways (and a little back) for `for`.
 // And blind, it goes hard round cover for `flank` after last touching a wall.
 export const UNSTICK = { after: 0.35, for: 0.6, back: 0.35, flank: 1.5 };
+// Trapped: trying to move and not a metre from where it was this long ago. The
+// bot's runs found a sketch wedged under the big pencil, in the crook where the
+// shaft meets the cone: inside the drawing, where nothing could see or shoot
+// it, for the rest of the run, and a wave that could not end. Whatever the
+// geometry, one stuck this long is rubbed out and drawn again somewhere open,
+// out of your sight and at least `away` from you. Ten seconds is past anything
+// the unstick steps above take to work.
+// It has to have been TRYING for `trying` of those seconds: one stood shooting
+// at you, or looking round where it lost you, is still on purpose.
+export const TRAPPED = { after: 10, trying: 6, moved: 1, away: 18 };
 // Highlighted: after a highlighter last had you in sight, how long every enemy
 // on the desk goes on knowing where you are.
 export const HIGHLIGHT = { hold: 3 };
@@ -79,6 +89,17 @@ export const AWARE = {
   idle: [1, 3],
   drift: 45,               // no contact for this long: roaming leans toward your last noise
   pips: 25,                // ...and with two or fewer left, this long: the HUD points at them
+  // ...and this long, they come looking: sent to search where you are, again
+  // every `straggleEvery` until one sees you. In the bot's playtest runs
+  // (tools/autoplay.mjs) wave 1 alone took up to 160 s, most of it walking the
+  // desk after the last one or two while they roamed: the end of a wave should
+  // be a lull, not a search. 10 s after the pips, so the pips get the first
+  // chance to lead you to them. A search, not a hunt: a hunt refreshed every
+  // frame never goes blind, so one that could not reach you (you up on a
+  // ledge, it below) pushed at the wall for the rest of the run. A sniper on
+  // its nest stays put; the pips still point at it.
+  straggle: 35,
+  straggleEvery: 8,
 };
 
 /** What the player is doing, as far as being noticed goes. */
@@ -186,6 +207,11 @@ export class Enemies {
       ladder: null,             // climbing this
       endClock: 0,                 // getting off the top of one
       mind: 'roam',             // roam | hunt | search; see perceive()
+      straggling: false,        // sent looking for you as one of the last (AWARE.straggle)
+      wantsMove: false,         // this frame it was trying to go somewhere (see trapped)
+      stillAt: null,            // where it was when it last got a metre further on
+      stillT: 0,
+      tryT: 0,                  // ...and of that, how long it was trying to move
       mindT: 0,
       notice: 0,                // 0-1: how close it is to having noticed you
       markT: 0,                 // the `!` over its head
@@ -341,6 +367,20 @@ export class Enemies {
     this.stance = stanceOf(p);
     this.contactT += dt;
     this.highlightT = Math.max(0, this.highlightT - dt);
+    if (this.alive > 0 && this.alive <= 2 && this.contactT > AWARE.straggle) {
+      for (const e of this.list) {
+        if (!e.alive) continue;
+        if (e.t.role?.stationary) {
+          // a sniper on a nest nobody can see from where you are (the mug's,
+          // seen only over its rim) moves to one that can see you, and fires
+          // from there: the round in the air is what gives it away
+          if (!this.canSee(e, p) && (!e.straggling || e.mindT > AWARE.straggleEvery * 2)) this.renest(e, p);
+          continue;
+        }
+        if (e.mind === 'hunt') continue;
+        if (e.mind !== 'search' || e.mindT > AWARE.straggleEvery) { this.search(e, p.center); e.straggling = true; }
+      }
+    }
     if (this.stance === 'sprint') this.noiseAt.copy(p.center);
     for (let i = this.list.length - 1; i >= 0; i--) {
       const e = this.list[i];
@@ -359,6 +399,7 @@ export class Enemies {
         continue;
       }
       this.think(e, dt, p);
+      this.trapped(e, dt, p);
     }
     this.updateBullets(dt, p);
 
@@ -370,6 +411,62 @@ export class Enemies {
       for (const e of this.list) if (e.alive) this.pips.push(e);
     }
     this.marks?.update(this.list);
+  }
+
+  /** A straggling sniper to a free nest with a line to you; see AWARE.straggle. */
+  renest(e, p) {
+    e.straggling = true;
+    e.mindT = 0;
+    const free = (this.ctx.level.snipers || []).filter((n) => {
+      if (this.list.some((o) => o.alive && o !== e && o.body.pos.distanceTo(n) < 2)) return false;
+      _v.set(n.x, n.y + 1.5, n.z);
+      _d.copy(p.center).sub(_v);
+      const d = _d.length();
+      return !raycast(this.ctx.level, _v, _d.multiplyScalar(1 / d), d - 0.5);
+    });
+    const n = free[Math.floor(Math.random() * free.length)];
+    if (!n) return;
+    e.body.pos.set(n.x, n.y + 0.1, n.z);
+    e.body.vel.set(0, 0, 0);
+    e.fig.root.position.copy(e.body.pos);
+    e.lookYaw = Math.atan2(-(p.center.x - n.x), -(p.center.z - n.z));
+    e.yaw = e.lookYaw;
+    this.redrawn = (this.redrawn || 0) + 1;
+  }
+
+  /** See TRAPPED: one that has been going nowhere for too long is drawn again elsewhere. */
+  trapped(e, dt, p) {
+    if (e.ladder || e.t.role?.stationary) { e.stillAt = null; return; }
+    if (!e.stillAt || e.body.pos.distanceTo(e.stillAt) > TRAPPED.moved) {
+      (e.stillAt ||= new THREE.Vector3()).copy(e.body.pos);
+      e.stillT = 0;
+      e.tryT = 0;
+      return;
+    }
+    e.stillT += dt;
+    if (e.wantsMove) e.tryT += dt;
+    if (e.stillT < TRAPPED.after || e.tryT < TRAPPED.trying) return;
+    const pool = this.ctx.level.spawnPool || [];
+    const out = [];
+    for (const q of pool) {
+      if (Math.hypot(q.x - p.body.pos.x, q.z - p.body.pos.z) < TRAPPED.away) continue;
+      _d.set(q.x, q.y + 1.2, q.z).sub(p.eye);
+      const d = _d.length();
+      if (!raycast(this.ctx.level, p.eye, _d.multiplyScalar(1 / d), d)) continue;   // in your sight
+      out.push(q);
+    }
+    const q = out[Math.floor(Math.random() * out.length)];
+    if (!q) return;
+    e.body.pos.set(q.x, q.y + 0.1, q.z);
+    e.body.vel.set(0, 0, 0);
+    e.fig.root.position.copy(e.body.pos);
+    e.stillAt.copy(e.body.pos);
+    e.stillT = 0;
+    e.tryT = 0;
+    e.roamTo = null;
+    e.wedgedFor = 0;
+    e.wallT = 0;
+    this.redrawn = (this.redrawn || 0) + 1;
   }
 
   think(e, dt, p) {
@@ -465,6 +562,7 @@ export class Enemies {
       // said: every enemy on the desk walked at the same pace, and the cutter's
       // 9.4 was never reached.
       let wx = 0, wz = 0, carried = false;
+      e.wantsMove = false;
       // Up where it cannot get to you: head for a ladder instead. Only what has
       // to reach you does this unconditionally; a gun that can see you shoots.
       const lad = hunting && !staggered && (kind === 'melee' || kind === 'charge' || !sees) && p.body.pos.y - b.pos.y >= CLIMB.above
@@ -487,10 +585,12 @@ export class Enemies {
         if (b.onGround && b.pos.y > lip - 0.1) e.endClock = 0;
       } else if (!hunting) {
         if (!staggered && !t.role?.stationary && this.wander(e, dt)) {
+          e.wantsMove = true;
           wx = _d.x * speed * (e.mind === 'search' ? AWARE.searchSpeed : AWARE.roamSpeed);
           wz = _d.z * speed * (e.mind === 'search' ? AWARE.searchSpeed : AWARE.roamSpeed);
         }
       } else if (wantMove !== 0) {
+        e.wantsMove = true;
         // Strafe a little as they close, so they are not a straight line of
         // targets walking down your barrel.
         //
@@ -761,6 +861,7 @@ export class Enemies {
     if (p) e.lastKnown.copy(p.center);
     e.blindFor = 0;
     e.notice = 1;
+    e.straggling = false;
     if (e.mind === 'hunt') return;
     e.mind = 'hunt';
     e.mindT = 0;
@@ -825,12 +926,18 @@ export class Enemies {
     if (arrived || e.wallT > AWARE.stuck) {
       e.lookYaw = e.yaw;
       e.mindT = 0;
-      if (e.mind === 'search') {
+      if (e.mind === 'search' && (arrived || !e.straggling)) {
         // look round where it lost you, then roam about there
         e.lookT = AWARE.searchFor;
         e.roamTo = null;
         return false;
       }
+      // A straggler (AWARE.straggle) held against a wall short of the place:
+      // another way in, from somewhere else near it. Stopping to look round as
+      // if it had arrived, it was sent back to the same place and walked into
+      // the same wall for the rest of the wave. Anything else still stops and
+      // looks, as it always has: pressing on round every wall makes the whole
+      // game harder, which is a tuning decision and not this fix.
       e.roamTo = null;
       if (e.wallT > AWARE.stuck) { e.flank = -e.flank; e.wallT = 0; }
       else if (Math.random() < AWARE.idleChance) { e.lookT = rand(AWARE.idle); return false; }
@@ -964,6 +1071,7 @@ export class Enemies {
 
   /** Returns whether it landed: false if the katana blocked or parried it. */
   meleeHit(e, p) {
+    if (!p.alive) return false;          // see updateBullets: nothing lands on the death screen
     // The katana gets first refusal, as it does on rounds. Blocked or parried,
     // the striker is shoved back off the blade; a parry has also staggered it.
     const verdict = this.ctx.onIncomingMelee?.(e);
@@ -1010,7 +1118,10 @@ export class Enemies {
         _to.copy(p.center).sub(bu.pos);
         const along = clamp(_to.dot(_d), 0, step);
         _hit.copy(bu.pos).addScaledVector(_d, along);
-        if (_hit.distanceTo(p.center) < 0.55) {
+        // Not a body on the floor: the bot's runs logged rounds and blades
+        // landing on the death screen for seconds after the end, each with
+        // its hurt flash, kick and sound. They fly on past it instead.
+        if (p.alive && _hit.distanceTo(p.center) < 0.55) {
           // A pellet's damage is settled by how far it came, before the katana
           // sees it: a parry returns what would have landed.
           if (bu.falloff) {

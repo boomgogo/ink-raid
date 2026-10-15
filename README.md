@@ -68,6 +68,28 @@ the game pauses when its window loses focus.
 | `npm run shots`, then `node tools/compare.mjs gate shots/stills/*.png` | the look of the page, as numbers |
 | `npm run distcheck` | the build ships the game and nothing else |
 
+### The bot and the videos
+
+`npm run autoplay` lets a bot play a whole run and records it. The bot plays by
+a player's rules:
+
+- it only presses keys and moves the mouse;
+- it only acts on what is on screen and on the HUD;
+- its reaction time and turn speed are a person's.
+
+The game runs on a virtual clock and is photographed frame by frame, so the
+video is 1080p60 with no dropped frames on any machine. The sound is rendered
+offline to the same clock. Recordings go to `OUT_DIR` (default
+`/run/media/p1/DRIVE2/ink-raid`).
+
+| command | does |
+|---|---|
+| `npm run autoplay` | one recorded run, 1920x1080 (about an hour to record ten minutes of play) |
+| `npm run autoplay -- --portrait` | the same at 1080x1920, for a Short |
+| `npm run autoplay -- --fast --runs 5` | five unrecorded runs, about 5x faster than real time, to test the bot or the game |
+| `npm run botreport` | the playtest numbers from every run: waves, damage by enemy, deaths, stuck spots, heap over time |
+| `npm run cut -- --long <run> --short <portrait run>` | the YouTube video, its chapters and thumbnail, a Short, and a clip for X |
+
 ## Credits
 
 - Inspired by <https://doodleshooter.vercel.app>

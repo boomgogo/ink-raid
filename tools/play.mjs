@@ -4,6 +4,13 @@
 // whether it looks good — whether the bob is too much, the roll too little, the
 // landing dip readable, the grapple satisfying. That needs watching.
 import { chromium } from 'playwright';
+
+// `npm run play -- --bot`: the bot plays a whole run instead (tools/autoplay.mjs,
+// which takes the rest of the flags)
+if (process.argv.includes('--bot')) {
+  await import('./autoplay.mjs');
+  process.exit(0);
+}
 import { mkdir, readdir, rename, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';

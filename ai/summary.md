@@ -67,6 +67,32 @@ See the table in `README.md`. The browser tools need Chrome and `npm run preview
 and must run one at a time. `compare.mjs` holds the style contract (paper, ink, dot grid, ink load)
 and the figure-legibility band. Both are measured from this build.
 
+## The bot and the recordings
+
+`tools/autoplay.mjs` lets a bot play whole runs, unrecorded for testing or recorded for video.
+`tools/cut.mjs` turns the recordings into a YouTube video, a Short and a clip for X.
+`tools/bot/report.mjs` sums the runs up as playtest numbers.
+
+- **The clock:** `tools/bot/clock.js` replaces `performance.now`, `requestAnimationFrame`, the
+  timers and the HUD's CSS animations with a virtual clock. The tool steps it one 1/60 s frame at a
+  time and screenshots each frame over CDP.
+  - Real-time tab capture topped out near 30 fps at 1080p on the development machine.
+  - The virtual clock gives exact 60 fps on any machine, at about 95 ms per frame.
+- **The sound:** every `noise()`/`tone()` call in `fx/audio.js` is logged against the virtual
+  clock, then rendered offline into an `OfflineAudioContext`.
+- **The bot plays by a player's rules:**
+  - `sense.js` copies what is on screen and on the HUD into a plain snapshot.
+  - `brain.js` decides from that snapshot alone. `autoplay.mjs` refuses to run if `brain.js`
+    names the game or the page.
+  - `driver.js` writes keys, the trigger and mouse counts, nothing else.
+  - It has human limits: 180–260 ms reaction, a spring-damped hand with a top speed, and a fire
+    tolerance of about the target's size.
+  - It knows the map the way a player learns it: a 0.5 m walk grid built from the real level
+    (`navgrid.mjs`, the same column test as `reach.mjs`) and where the sniper nests are.
+- **Output:** recordings go to `/run/media/p1/DRIVE2/ink-raid` (`OUT_DIR`), one folder per run
+  with `events.jsonl`. `tools/bot/stage.mjs` sets up a scene for reproducing what a run's log
+  shows.
+
 ## Conventions
 
 - **Units:** metres and seconds.
@@ -103,6 +129,19 @@ example: hits to kill, magazine time, apex height, settle time.
 **Springs** (`core/spring.js`) are solved exactly each frame, so how they settle does not depend
 on the frame rate.
 
+## Enemies that cannot be found or reached
+
+Found by the bot's runs (see `ai/next_1.md`), all in `entities/enemies/manager.js`:
+
+- **Stragglers** (`AWARE.straggle`): the last two, unfound for 35 s, are sent to search where you
+  are, every 8 s. A straggler blocked by a wall tries another way in.
+- **Nest snipers** that cannot see you from their nest are redrawn on a free nest that can
+  (`renest`). The mug's nest only sees over the rim.
+- **Trapped** (`TRAPPED`): an enemy trying to move but not a metre further on in 10 s is redrawn
+  somewhere open, out of sight. One was found wedged under the big pencil, where it could not be
+  seen or shot.
+- **After death**, rounds and blades no longer land on the player.
+
 ## Known issues and next steps
 
 - **Seams:** where the slice family changes on curved surfaces, lines meet in soft chevrons.
@@ -112,4 +151,11 @@ on the frame rate.
   - `tools/collide.mjs`'s report counts many shots just beside a figure as hits.
   - None are missed where the figure is drawn.
   - Narrowing the capsules in `entities/enemies/rig.js` would tighten it.
-- **Untested by play:** the tuning was re-derived from targets and needs a playtest.
+- **Untested by people:** the tuning was re-derived from targets. The bot's runs are the only
+  playtest so far.
+- **Fill rate:**
+  - At 1920x1080 the frame costs about 31 ms of GPU time on an HD 630 (2017) whatever is on screen,
+    so about 32 fps.
+  - `npm run perf` measures 1280x800.
+  - A newer integrated GPU is two to three times faster.
+- **Off-screen damage:** about 40% of the bot's hits came from enemies not on screen.

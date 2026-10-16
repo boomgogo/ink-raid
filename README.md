@@ -88,7 +88,7 @@ offline to the same clock. Recordings go to `OUT_DIR` (default
 | `npm run autoplay -- --portrait` | the same at 1080x1920, for a Short |
 | `npm run autoplay -- --fast --runs 5` | five unrecorded runs, about 5x faster than real time, to test the bot or the game |
 | `npm run botreport` | the playtest numbers from every run: waves, damage by enemy, deaths, stuck spots, heap over time |
-| `npm run cut -- --long <run> --short <portrait run>` | the YouTube video, its chapters and thumbnail, a Short, and a clip for X |
+| `npm run cut -- --long <run> --short <portrait run> [--link <url>] [--text]` | the YouTube video, its chapters and thumbnail, a Short, and a clip for X, each with its post text (`--text`: only the posts, no encoding) |
 
 ## Credits
 

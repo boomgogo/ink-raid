@@ -70,7 +70,7 @@ and the figure-legibility band. Both are measured from this build.
 ## The bot and the recordings
 
 `tools/autoplay.mjs` lets a bot play whole runs, unrecorded for testing or recorded for video.
-`tools/cut.mjs` turns the recordings into a YouTube video, a Short and a clip for X.
+`tools/cut.mjs` turns the recordings into a YouTube video, a Short and a clip for X, and writes the text to post with each.
 `tools/bot/report.mjs` sums the runs up as playtest numbers.
 
 - **The clock:** `tools/bot/clock.js` replaces `performance.now`, `requestAnimationFrame`, the

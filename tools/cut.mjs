@@ -1,6 +1,9 @@
 // Cut the bot's recorded runs into the videos people watch.
 //
 //   node tools/cut.mjs --long <run dir> [--short <portrait run dir>] [--x <run dir>]
+//                      [--link <play url>] [--text]
+//
+// --text writes only the .txt posts, from the same picks, without encoding.
 //
 // Out, in OUT_DIR/out (default /run/media/p1/DRIVE2/ink-raid/out):
 //
@@ -8,7 +11,9 @@
 //   youtube_long.txt   a description with chapters from the waves and bosses
 //   thumbnail.png      1280x720, the best moment and the wave reached
 //   short.mp4          1080x1920, 45-58 s of the portrait run's best moments
+//   short.txt          the Short's title and description
 //   x.mp4              1920x1080, 30-45 s of the long run's best moments, captioned
+//   x.txt              the post to go with it, within X's 280 characters
 //   cuts.json          which windows went in, and why
 //
 // Highlights come from the run's events.jsonl (tools/autoplay.mjs): kills
@@ -34,6 +39,8 @@ await mkdir(TMP, { recursive: true });
 const LONG = opt('long');
 const SHORT = opt('short');
 const XRUN = opt('x', LONG);
+const LINK = opt('link', '<link>');
+const TEXT = argv.includes('--text');
 if (!LONG && !SHORT) { console.error('usage: cut.mjs --long <run dir> [--short <run dir>] [--x <run dir>]'); process.exit(1); }
 
 function ff(args, label) {
@@ -180,8 +187,95 @@ async function finish(video, cards, file, maxrate = '40M') {
 
 const cuts = {};
 
+/** YouTube wants the first chapter at 0:00 and each at least 10 s apart. */
+function chapters(run) {
+  const out = [{ t: 0, label: 'Title screen' }];
+  for (const e of run.events) {
+    if (e.type !== 'wave') continue;
+    const label = e.boss ? `Wave ${e.n}: boss` : `Wave ${e.n}${e.mod ? ` (${e.mod.toLowerCase()})` : ''}`;
+    if (e.t - out[out.length - 1].t >= 10) out.push({ t: e.t, label });
+  }
+  const death = run.events.find((e) => e.type === 'death');
+  if (death && death.t - out[out.length - 1].t >= 10) out.push({ t: death.t, label: 'The end' });
+  return out;
+}
+
+// --- the posts that go with the reels ----------------------------------------------------
+// The opening moment is the hook, said in words as well: both autoplay muted.
+function hook(m) {
+  const boss = m?.caption?.match(/^(.+) DOWN$/);
+  if (boss) return `Taking down ${boss[1]} in a shooter drawn in pen`;
+  const combo = m?.caption?.match(/^x(\d+) COMBO$/);
+  if (combo) return `An x${combo[1]} combo in a shooter drawn in pen`;
+  if (m?.caption === 'BOSS WAVE') return 'A boss wave in a shooter drawn in pen';
+  return 'Ink Raid: a first-person shooter drawn in pen on paper';
+}
+// X counts every link as 23 characters, whatever its length
+const xLength = (t) => t.replace(/https?:\/\/\S+|<link>/g, 'x'.repeat(23)).length;
+
+function posts(name, run, list) {
+  const s = run.summary;
+  const pts = s.score.toLocaleString('en');
+  const h = hook(list[0]);
+  if (name === 'short') {
+    // YouTube: a title of at most 100 characters, then the description
+    const title = `${h} #Shorts`;
+    if (title.length > 100) console.warn(`short.txt: the title is ${title.length} characters, over 100`);
+    return [
+      'TITLE', title, '',
+      'DESCRIPTION',
+      'Ink Raid: a first-person shooter drawn as pen on paper, running in the browser, on desktop or phone. Everything on screen is drawn from code at run time, and every sound is synthesised.',
+      '',
+      `This run: wave ${s.wave}, ${pts} points, ${s.kills} kills. Played by an autoplay bot held to human limits.`,
+      '',
+      `Play it: ${LINK}`,
+      '',
+      '#Shorts #indiegame #fps #browsergame #threejs',
+    ].join('\n');
+  }
+  // X: 280 characters; drop the least needed lines until it fits
+  const lines = [
+    `${h}.`,
+    'Ink Raid runs in your browser, on desktop or phone. Every line is drawn from code as you play.',
+    `Bot run: wave ${s.wave}, ${pts} points, ${s.kills} kills.`,
+    `Play it: ${LINK}`,
+    '#indiedev #threejs',
+  ];
+  let text = lines.join('\n\n');
+  for (const drop of [4, 1]) {
+    if (xLength(text) <= 280) break;
+    lines.splice(drop, 1);
+    text = lines.join('\n\n');
+  }
+  if (xLength(text) > 280) console.warn(`x.txt: ${xLength(text)} characters, over 280`);
+  return text;
+}
+
 // --- 1. the long one: the whole run --------------------------------------------------
 if (LONG) {
+  const run = await loadRun(LONG);
+  const s = run.summary;
+  const ch = chapters(run);
+  const kb = Object.entries(s.killsByFoe || {}).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(', ');
+  const desc = [
+    `Ink Raid: one continuous run, from the title screen to the last wave. Wave ${s.wave}, ${s.score.toLocaleString('en')} points, ${s.kills} kills, ${mmss(s.gameSeconds)} of play on the standard difficulty.`,
+    '',
+    'A first-person shooter drawn as pen on paper, in the browser. Everything on screen is drawn from code at run time, and every sound is synthesised.',
+    '',
+    'Played by an autoplay bot held to human limits (reaction time, mouse speed, only what is on screen), recorded frame by frame at 1080p60.',
+    '',
+    `Play it: ${LINK}`,
+    '',
+    ...ch.map((c) => `${mmss(c.t)} ${c.label}`),
+    '',
+    `Kills: ${kb}`,
+    '',
+    '#indiegame #fps #browsergame #threejs #gamedev',
+  ].join('\n');
+  await writeFile(path.join(DEST, 'youtube_long.txt'), desc + '\n');
+  console.log(`youtube_long.txt: ${ch.length} chapters`);
+}
+if (LONG && !TEXT) {
   const run = await loadRun(LONG);
   const s = run.summary;
   const startT = s.startSecond ?? 2.5;
@@ -196,33 +290,6 @@ if (LONG) {
     { png: end, at: Math.min(run.duration - 4.6, endT + 0.4), dur: 4.2, y: 'H-h-90' },
   ], path.join(DEST, 'youtube_long.mp4'));
 
-  // chapters: YouTube wants the first at 0:00 and each at least 10 s apart
-  const chapters = [{ t: 0, label: 'Title screen' }];
-  for (const e of run.events) {
-    if (e.type !== 'wave') continue;
-    const label = e.boss ? `Wave ${e.n}: boss` : `Wave ${e.n}${e.mod ? ` (${e.mod.toLowerCase()})` : ''}`;
-    if (e.t - chapters[chapters.length - 1].t >= 10) chapters.push({ t: e.t, label });
-  }
-  const death = run.events.find((e) => e.type === 'death');
-  if (death && death.t - chapters[chapters.length - 1].t >= 10) chapters.push({ t: death.t, label: 'The end' });
-  const kb = Object.entries(s.killsByFoe || {}).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(', ');
-  const desc = [
-    `Ink Raid: one continuous run, from the title screen to the last wave. Wave ${s.wave}, ${s.score.toLocaleString('en')} points, ${s.kills} kills, ${mmss(s.gameSeconds)} of play on the standard difficulty.`,
-    '',
-    'A first-person shooter drawn as pen on paper, in the browser. Everything on screen is drawn from code at run time, and every sound is synthesised.',
-    '',
-    'Played by an autoplay bot held to human limits (reaction time, mouse speed, only what is on screen), recorded frame by frame at 1080p60.',
-    '',
-    'Play it: <link>',
-    '',
-    ...chapters.map((c) => `${mmss(c.t)} ${c.label}`),
-    '',
-    `Kills: ${kb}`,
-    '',
-    '#indiegame #fps #browsergame #threejs #gamedev',
-  ].join('\n');
-  await writeFile(path.join(DEST, 'youtube_long.txt'), desc + '\n');
-
   // the thumbnail: the best moment, and the wave it got to
   const best = moments(run).sort((a, b) => b.score - a.score)[0];
   const at = best ? best.peak + 0.15 : run.duration / 2;
@@ -235,7 +302,7 @@ if (LONG) {
        <div style="font-size:132px;font-weight:700;line-height:.95">WAVE <span class="red">${s.wave}</span></div>
        <div style="font-size:50px;font-weight:700;line-height:1.3">INK RAID &middot; ${s.score.toLocaleString('en')}</div>
      </div>`);
-  cuts.long = { run: run.dir, duration: run.duration, chapters, thumbnailAt: at };
+  cuts.long = { run: run.dir, duration: run.duration, chapters: chapters(run), thumbnailAt: at };
   console.log(`youtube_long.mp4: ${mmss(run.duration)}, wave ${s.wave}, score ${s.score}`);
 }
 
@@ -243,6 +310,9 @@ if (LONG) {
 async function reel(run, { name, lo, hi, w, h, captions }) {
   const ms = moments(run);
   const { list, length } = pick(ms, lo, hi);
+  await writeFile(path.join(DEST, `${name}.txt`), posts(name, run, list) + '\n');
+  console.log(`${name}.txt: opens on ${list[0]?.caption || 'no caption'}`);
+  if (TEXT) return;
   const segs = [];
   for (let i = 0; i < list.length; i++) segs.push(await segment(run.video, list[i].a, list[i].b, path.join(TMP, `${name}-${i}.mp4`),
     `scale=${w}:${h}:force_original_aspect_ratio=increase:flags=lanczos,crop=${w}:${h}`));
@@ -274,7 +344,9 @@ if (SHORT) await reel(await loadRun(SHORT), { name: 'short', lo: 45, hi: 58, w: 
 if (XRUN) await reel(await loadRun(XRUN), { name: 'x', lo: 30, hi: 45, w: 1920, h: 1080, captions: true });
 
 // added to what earlier cuts wrote: a Short cut on its own keeps the long video's entry
-const prev = existsSync(path.join(DEST, 'cuts.json')) ? JSON.parse(await readFile(path.join(DEST, 'cuts.json'), 'utf8')) : {};
-await writeFile(path.join(DEST, 'cuts.json'), JSON.stringify({ ...prev, ...cuts }, null, 2));
+if (!TEXT) {
+  const prev = existsSync(path.join(DEST, 'cuts.json')) ? JSON.parse(await readFile(path.join(DEST, 'cuts.json'), 'utf8')) : {};
+  await writeFile(path.join(DEST, 'cuts.json'), JSON.stringify({ ...prev, ...cuts }, null, 2));
+}
 await browser?.close();
 if (existsSync(TMP) && !argv.includes('--keep')) await rm(TMP, { recursive: true });

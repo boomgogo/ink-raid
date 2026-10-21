@@ -52,6 +52,11 @@ export class Pickups {
     this.spots = (ctx.level.pickupSpots || []).map((s) => ({ ...s, pos: this.settle(s.pos)?.pos || s.pos.clone(), takenT: 0, here: null }));
     // Take one: return true if it was taken. Game sets this.
     this.onTouch = null;
+    // In a room, as a guest (net/horde.js): the host's list is drawn here, and walking over
+    // something asks the host for it (`onAsk`). On the host, `onChange` tells the others.
+    this.follow = false;
+    this.onAsk = null;
+    this.onChange = null;
 
     // A rolled bandage lying on its side, and a red cross on each end.
     const roll = new THREE.CylinderGeometry(0.3, 0.3, 0.46, 12);
@@ -108,12 +113,14 @@ export class Pickups {
 
   /** Roll a kill's drops. */
   onFoeDown(e) {
+    if (this.follow) return;
     for (const row of DROPS) {
       if (Math.random() < row.chance(e)) this.drop(row.item, e.body.pos);
     }
   }
 
   drop(item, at, o = {}) {
+    if (this.follow) return null;
     const under = this.settle(at);
     if (!under) return null;
     const pos = under.pos;
@@ -124,31 +131,38 @@ export class Pickups {
     }
     const q = { item, pos, age: 0, life: o.life ?? PICKUP.life, spot: null, mover: under.mover, lpos: under.lpos };
     this.list.push(q);
+    this.onChange?.();
     return q;
   }
 
+  /** `player`: who can walk over things this frame, or null for nobody. */
   update(dt, player) {
-    const b = player.body;
+    const b = player?.body;
+    let changed = false;
     for (let i = this.list.length - 1; i >= 0; i--) {
       const q = this.list[i];
       q.age += dt;
       if (q.mover) q.pos.copy(q.lpos).applyMatrix4(q.mover.matrix);
-      if (q.age >= q.life) { this.list.splice(i, 1); continue; }
-      if (!player.alive) continue;
+      if (q.age >= q.life) { this.list.splice(i, 1); changed = true; continue; }
+      if (!player?.alive) continue;
       if (Math.hypot(q.pos.x - b.pos.x, q.pos.z - b.pos.z) > PICKUP.reach) continue;
       if (Math.abs(q.pos.y - b.pos.y) > PICKUP.reachY) continue;
+      if (this.follow) { this.onAsk?.(q); continue; }
       if (!this.onTouch?.(q.item)) continue;              // full up: it stays
       this.list.splice(i, 1);
+      changed = true;
       if (q.spot) { q.spot.here = null; q.spot.takenT = 0; }
     }
-    for (const s of this.spots) {
+    for (const s of this.follow ? [] : this.spots) {
       if (s.here) continue;
       s.takenT += dt;
       if (s.takenT >= PICKUP.respawn) {
         s.here = { item: s.item, pos: s.pos, age: 0, life: Infinity, spot: s };
         this.list.push(s.here);
+        changed = true;
       }
     }
+    if (changed && !this.follow) this.onChange?.();
     this.draw(dt);
   }
 

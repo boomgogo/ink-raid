@@ -158,7 +158,7 @@
   function blankOut() {
     return {
       keys: { forward: false, back: false, left: false, right: false, sprint: false, jump: false, crouch: false,
-        grapple: false, reload: false, melee: false, grenade: false, heal: false,
+        jet: false, reload: false, melee: false, grenade: false, heal: false,
         slot1: false, slot2: false, slot3: false, slot4: false, slot5: false },
       fire: false, aim: false, look: [0, 0], note: null,
     };

@@ -11,7 +11,7 @@ export const BINDINGS = {
   jump: ['Space'],
   sprint: ['ShiftLeft', 'ShiftRight'],
   crouch: ['KeyC', 'ControlLeft'],
-  grapple: ['KeyQ', 'KeyE'],
+  jet: ['KeyQ', 'KeyE'],
   reload: ['KeyR'],
   melee: ['KeyF'],
   grenade: ['KeyG'],
@@ -248,7 +248,7 @@ export class Input {
     set('reload', btn(2));
     set('melee', btn(3));
     set('grenade', btn(5));
-    set('grapple', btn(4));
+    set('jet', btn(4));
     set('pause', btn(9));
     set('heal', btn(14));                     // d-pad left
     if (btn(12) && !this._padPrev.up) this.wheel -= 1;

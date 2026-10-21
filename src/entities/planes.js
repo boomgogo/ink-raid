@@ -102,7 +102,11 @@ function instanced(geo, mat) {
 export class Planes {
   constructor(ctx) {
     this.ctx = ctx;
-    this.onDown = null;          // (plane) => void: shot down, for the killfeed
+    this.onDown = null;          // (plane, by) => void: shot down, for the killfeed; `by` a friend in a room
+    // In a room, as a guest (net/horde.js): where the planes are comes from the host
+    // (`follower`), and shooting one down asks the host (`asked`).
+    this.follower = null;
+    this.asked = null;
     this.mesh = instanced(paperDart(), surface({ ink: INK.PEN, lift: 0.22, side: THREE.DoubleSide }));
     this.crosses = instanced(crossMark(), surface({ ink: INK.RED, look: LOOK.SOLID }));
     this.staples = instanced(stapleMark(), surface({ ink: INK.BLACK, look: LOOK.SOLID }));
@@ -150,6 +154,11 @@ export class Planes {
   }
 
   update(dt) {
+    if (this.follower) {
+      this.follower(dt);
+      this.draw();
+      return;
+    }
     for (const p of this.list) {
       if (p.mode === 'fly') this.fly(p, dt);
       else if (p.mode === 'fall') this.fall(p, dt);
@@ -189,13 +198,14 @@ export class Planes {
   }
 
   /** Shot: it noses over into a tightening spiral, in towards the middle. */
-  down(p) {
+  down(p, by) {
+    if (this.asked) return this.asked(p);
     p.mode = 'fall';
     p.spin = (Math.random() < 0.5 ? -1 : 1) * 2.4;
     p.pitch = 0;
     p.vel.multiplyScalar(0.8).setY(-2);
     p.yaw = Math.atan2(-p.vel.x, -p.vel.z);
-    this.onDown?.(p);
+    this.onDown?.(p, by);
   }
 
   fall(p, dt) {

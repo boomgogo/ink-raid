@@ -37,6 +37,10 @@ export const SPAWN = {
   sightProbeHeight: 1.2, // and out of your sight: a line from your eye to here on the point
 };
 
+// With friends (net/room.js): each player past the first adds half a wave and two more alive at
+// once, up to `max`. Health is not scaled: more guns, more figures.
+export const CREW = { perPlayer: 0.5, capPerPlayer: 2, max: 20 };
+
 const _eye = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 
@@ -71,6 +75,18 @@ export class WaveDirector {
 
   get remaining() { return this.ctx.enemies.alive + this.toSpawn.length; }
 
+  /** Everybody the horde can go for: alone, your player; in a room, everybody up and in the run. */
+  players() {
+    const net = this.ctx.enemies.net;
+    const list = net ? net.targets([]) : null;
+    return list && list.length ? list : [this.ctx.player];
+  }
+
+  /** How many may be alive at once. */
+  cap() {
+    return Math.min(Math.max(difficulty.crowdCap, CREW.max), difficulty.crowdCap + CREW.capPerPlayer * (this.players().length - 1));
+  }
+
   nextWave() {
     this.wave++;
     const w = this.wave;
@@ -93,14 +109,15 @@ export class WaveDirector {
     Object.assign(this.ctx.enemies.mods, mods);
 
     this.toSpawn = [];
+    const crew = 1 + CREW.perPlayer * (this.players().length - 1);
     if (isBoss) {
       this.bossCount++;
       this.bossKey = BOSS_ORDER[(this.bossCount - 1) % BOSS_ORDER.length];
       this.toSpawn.push(this.bossKey);
-      const escorts = Math.round((4 + w) * difficulty.escortMul);
+      const escorts = Math.round((4 + w) * difficulty.escortMul * crew);
       for (let i = 0; i < escorts; i++) this.toSpawn.push('sketch');
     } else {
-      const full = Math.round((WAVES.baseCount + (w - 1) * WAVES.perWave) * (mods.count || 1));
+      const full = Math.round((WAVES.baseCount + (w - 1) * WAVES.perWave) * (mods.count || 1) * crew);
       // never thinned below 3, unless it was already smaller
       const n = Math.max(Math.min(full, 3), Math.round(full * difficulty.enemyCountMul));
       const pool = Object.keys(DEBUT).filter((type) => weightAt(type, w) > 0);
@@ -128,7 +145,7 @@ export class WaveDirector {
 
     if (this.state === 'spawning') {
       this.entryClock -= dt;
-      if (this.entryClock <= 0 && this.toSpawn.length && ctx.enemies.alive < difficulty.crowdCap) {
+      if (this.entryClock <= 0 && this.toSpawn.length && ctx.enemies.alive < this.cap()) {
         const key = this.toSpawn.shift();
         const at = this.chooseEntry(key);
         // a boss comes for you, and so does its escort
@@ -161,30 +178,34 @@ export class WaveDirector {
    */
   chooseEntry(key) {
     const lv = this.ctx.level;
-    const p = this.ctx.player;
+    // with friends, the rules hold for every one of them: far from all, and out of everybody's sight
+    const ps = this.players();
     if (TYPES[key]?.role?.stationary && lv.snipers.length) return this.pickNest();
     if (TYPES[key]?.role?.byTrain && lv.train) return this.onTrain();
     const pool = lv.spawnPool?.length ? lv.spawnPool : lv.spawns;
     if (!pool.length) return null;
     const alive = this.ctx.enemies.list.filter((e) => e.alive);
+    const nearest = (s) => {
+      let d = Infinity;
+      for (const p of ps) d = Math.min(d, Math.hypot(s.x - p.body.pos.x, s.z - p.body.pos.z));
+      return d;
+    };
 
     const order = shuffled(pool.length);
-    const far2 = SPAWN.minDist * SPAWN.minDist;
     for (let relax = 0; relax < 4; relax++) {
       for (const i of order) {
         const s = pool[i];
-        const dx = s.x - p.body.pos.x, dz = s.z - p.body.pos.z;
-        if (dx * dx + dz * dz < far2) continue;
+        if (nearest(s) < SPAWN.minDist) continue;
         if (relax < 1 && alive.some((e) => Math.hypot(e.body.pos.x - s.x, e.body.pos.z - s.z) < SPAWN.crowdMinDist)) continue;
         if (relax < 2 && this.recent.some((r) => Math.hypot(r.x - s.x, r.z - s.z) < SPAWN.recentMinDist)) continue;
-        if (relax < 3 && this.inSight(s)) continue;
+        if (relax < 3 && ps.some((p) => this.inSight(s, p))) continue;
         return this.remember(s);
       }
     }
-    // everything is within `minDist` of you: the furthest there is
+    // everything is within `minDist` of somebody: the furthest from everybody there is
     let best = pool[0], bd = -1;
     for (const s of pool) {
-      const d = Math.hypot(s.x - p.body.pos.x, s.z - p.body.pos.z);
+      const d = nearest(s);
       if (d > bd) { bd = d; best = s; }
     }
     return this.remember(best);
@@ -210,9 +231,8 @@ export class WaveDirector {
     return from[Math.floor(Math.random() * from.length)];
   }
 
-  /** Could you see something standing on point `s`? */
-  inSight(s) {
-    const p = this.ctx.player;
+  /** Could you (or `p`) see something standing on point `s`? */
+  inSight(s, p = this.ctx.player) {
     _eye.copy(p.eye);
     _dir.set(s.x, s.y + SPAWN.sightProbeHeight, s.z).sub(_eye);
     const d = _dir.length();

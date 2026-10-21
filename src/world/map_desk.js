@@ -263,7 +263,6 @@ function northStack(b) {
   b.sniperNest(cx, 15.5, cz);
   // A bandage at the top of every ladder tower: climbing pays.
   b.pickupSpot(cx - 9, 15.5, cz - 3, 'bandage', 'north stack roof');
-  b.anchor(cx, 16.5, cz + 4);
 }
 
 /**
@@ -339,7 +338,6 @@ function eastBinder(b) {
   for (const z of [-8, 0, 8]) {
     // standing on the desk, not 0.3 m into it
     b.torus(cx - 3.2, 4.85, cz + z, 4.4, 0.42, { ink: INK.BLACK, rotY: Math.PI / 2, seg: 20 });
-    b.anchor(cx - 3.2, 9.65, cz + z);
   }
 
   // Up the outside of a pillar. There was a staircase here, 14 m high in 8 m of
@@ -356,7 +354,7 @@ function eastBinder(b) {
 
 // ---------------------------------------------------------------------------
 // South: a tape dispenser. Its curve is a ramp you run up, which gives the map
-// one route to height that needs no stairs and no grapple.
+// one route to height that needs no stairs and no jetpack.
 //
 // The ramp used to finish in mid-air over the ring road, 5.5 m in front of the
 // deck it was drawn to reach, and it began on top of the 2.2 m base, which
@@ -389,12 +387,11 @@ function southDispenser(b) {
   b.cyl(cx, 4.95, cz + 5, 2.2, 5, { axis: 'x', ink: INK.PEN, seg: 14, tag: 'hub' });
   b.sniperNest(cx, top, back - 3.4);
   b.pickupSpot(cx + 3.5, top, back - 3.4, 'bandage', 'tape dispenser lip');
-  b.anchor(cx, top + 1.1, back - 3.4);
 }
 
 // ---------------------------------------------------------------------------
-// West: the mug. A landmark and a grapple destination, with sugar cubes to
-// climb so it is not grapple-only. It stood at the very edge of the desk: 2 m
+// West: the mug. A landmark and somewhere to fly to, with sugar cubes to
+// climb so it is not jetpack-only. It stood at the very edge of the desk: 2 m
 // in from it, the gap behind was a corridor with a 13 m wall on one side and a
 // fall off the page on the other. The desk has grown since, and behind it is
 // the open band the train runs in.
@@ -407,8 +404,6 @@ function westMug(b) {
   // tilted ring with both open ends hanging in the air, and a bullet that went
   // into one stopped on nothing drawn.
   b.torus(cx + 7.95, 7, cz, 4, 0.7, { ink: INK.PEN, arc: Math.PI, rotZ: -Math.PI / 2 });
-  b.anchor(cx, 14.5, cz);
-  b.anchor(cx + 11, 8, cz);
   b.sniperNest(cx, 13.2, cz);
   b.pickupSpot(cx + 3, 13.2, cz - 3, 'bandage', 'mug rim');
 
@@ -491,7 +486,6 @@ function pencilCup(b) {
   const onRim = (a) => [cx + Math.sin(a) * mid, h + 0.4, cz + Math.cos(a) * mid];
   b.sniperNest(...onRim(2.4));
   b.pickupSpot(...onRim(4.45), 'bandage', 'pencil cup rim');
-  b.anchor(cx, h + 1, cz);
 }
 
 // ---------------------------------------------------------------------------
@@ -526,7 +520,7 @@ function local(cx, cz, a) {
 const at = ([x, z], y) => [x, y, z];
 
 // ---------------------------------------------------------------------------
-// South-east: a staircase of erasers. No stairs, no grapple — just a climb,
+// South-east: a staircase of erasers. No stairs, no jetpack — just a climb,
 // with cover the whole way up.
 function eraserSteps(b) {
   const cx = 24, cz = 24;
@@ -560,7 +554,6 @@ function eraserSteps(b) {
   b.ladder(lx, 0, lz, ang - Math.PI / 2, 11.3, { name: 'eraser steps' });
   b.sniperNest(cx - 13, 11.4, cz - 4.6);
   b.pickupSpot(cx - 10.6, 11.4, cz - 5.5, 'bandage', 'sticky note on the erasers');
-  b.anchor(cx - 13, 12.5, cz - 4.6);
 }
 
 // ---------------------------------------------------------------------------
@@ -632,7 +625,6 @@ function rulerBridge(b) {
     b.box(mx + t * len * Math.cos(ang), 14.7, mz + t * len * Math.sin(ang), 0.15, 0.04,
       i % 5 === 0 ? 2.4 : 1.2, { ink: INK.BLACK, look: LOOK.SOLID, solid: false, rotY: -ang });
   }
-  b.anchor(mx, 14.2, mz);
 
   // Where the ruler runs in under the roof's overhang, the roof is 0.8 m above
   // it: a single jump is 0.78. A block on the ruler in front of the overhang
@@ -872,8 +864,8 @@ function gluePillars(b) {
 // ---------------------------------------------------------------------------
 // An anglepoise lamp in the north-east corner of the old desk, reaching out
 // over the pencil cup. Its base is a low dome you walk over (no corner to be
-// trapped in), and its arms and shade are the highest things on the map to
-// grapple: the arches that used to be grappled in the middle distance are gone.
+// trapped in), and its arms and shade are the highest things on the map: the
+// arches that used to stand in the middle distance are gone.
 function deskLamp(b) {
   const B = new THREE.Vector3(33, 0, -33);
   b.thing('lamp');
@@ -911,8 +903,6 @@ function deskLamp(b) {
   b.cyl(sc.x, sc.y, sc.z, 3.72, sh * 0.98, { rTop: 0.85, open: true, inside: true, ink: INK.BLUE, look: LOOK.WASH, seg: 18, dir: up, solid: false, ghost: 'decor' });
   const bulb = head.clone().addScaledVector(down, sh * 0.72);
   b.sphere(bulb.x, bulb.y, bulb.z, 1.1, { ink: INK.PEN, lift: 0.3, seg: 10, seg2: 6, solid: false, ghost: 'decor' });
-  b.anchor(elbow.x, elbow.y, elbow.z);
-  b.anchor(head.x, head.y, head.z);
 }
 
 // ---------------------------------------------------------------------------
@@ -952,7 +942,6 @@ function photoFrame(b) {
   const origin = P(-SHEET.w * k / 2, H / 2 - SHEET.h * k / 2, -0.02);
   b.strokes(COSTUME, origin, u, v, n, 0.11, { ink: INK.PEN, raise: 0.02 });
   b.strokes(AUTHOR, origin, u, v, n, 0.11, { ink: INK.RED, raise: 0.02 });
-  b.anchor(...P(0, H, 0).toArray());
 }
 
 // Waist-high junk on a roof: cover for a rooftop fight, and it stops the

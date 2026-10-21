@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { newBody, stepBody, floorAt, clearAbove, roomToStand, ladderAt, onLadder, ladderLocal, GRAVITY, PLAYER_BODY } from '../core/physics.js';
 import { Wobble, ease, clamp } from '../core/spring.js';
-import { Grapple } from './grapple.js';
+import { Jetpack, JET } from './jetpack.js';
 import { difficulty } from '../core/difficulty.js';
 
 // The player: movement, camera feel, health.
@@ -149,7 +149,7 @@ export class Player {
     this.eye = new THREE.Vector3();
     this.center = new THREE.Vector3();
 
-    this.grapple = new Grapple(ctx, this);
+    this.jet = new Jetpack(ctx, this);
     this.onVoidDrop = null;
     this.onLand = null;
     this.onStep = null;
@@ -168,7 +168,7 @@ export class Player {
     this.sliding = false;
     this.mantle = null;
     this.ladder = null;
-    this.grapple.detach();
+    this.jet.reset();
   }
 
   /**
@@ -194,7 +194,10 @@ export class Player {
     if (!this.alive) return;
     this.hp = Math.max(0, this.hp - n);
     this.hurtClock = 0;
-    if (this.hp <= 0) this.alive = false;
+    if (this.hp <= 0) {
+      this.alive = false;
+      this.jet.cut();
+    }
   }
 
   update(dt, input) {
@@ -248,15 +251,15 @@ export class Player {
     // take you. You get off by leaving its volume, jumping, reaching the bottom
     // going down, or reaching the top going up (see climb). Pad sticks and the
     // touch stick press forward and back like keys, so they need nothing.
-    if (this.ladder && (!onLadder(this.ladder, b.pos) || this.grapple.attached)) this.ladder = null;
-    if (!this.ladder && !this.mantle && this.climbCd <= 0 && fx !== 0) {
+    // Flying lets go of one, and does not take hold of one either.
+    if (this.ladder && (!onLadder(this.ladder, b.pos) || this.jet.burning)) this.ladder = null;
+    if (!this.ladder && !this.mantle && !this.jet.burning && this.climbCd <= 0 && fx !== 0) {
       const l = ladderAt(this.level, b.pos);
       if (l && -(this.forward.x * l.nx + this.forward.z * l.nz) >= LADDER.faceCos) {
         ladderLocal(l, b.pos, _lad);
         if (!(b.onGround && (fx < 0 || _lad.h > l.height - 0.6))) {
           this.ladder = l;
           this.sliding = false;
-          if (this.grapple.attached) this.grapple.detach();
         }
       }
     }
@@ -300,7 +303,7 @@ export class Player {
       this.climb(input, fx, sx);
     } else {
       // --- ground / air movement ---------------------------------------------
-      const grappling = this.grapple.attached;
+      const flying = this.jet.burning;
       let maxSpeed = this.sliding ? Math.max(flatSpeed, MOVE.walkSpeed)
         : this.crouching ? MOVE.crouchSpeed
           : this.sprinting ? MOVE.sprintSpeed : MOVE.walkSpeed;
@@ -337,8 +340,8 @@ export class Player {
       } else if (moving) {
         // air control: accelerate, but only up to the air cap, so you cannot
         // gain speed by holding forward off a ledge
-        const a = MOVE.airControl * dt * (grappling ? 1.5 : 1);
-        const cap = grappling ? 26 : MOVE.sprintSpeed;
+        const a = MOVE.airControl * dt * (flying ? JET.airControl : 1);
+        const cap = flying ? JET.airCap : MOVE.sprintSpeed;
         const nx = b.vel.x + _wish.x * a;
         const nz = b.vel.z + _wish.z * a;
         const sp = Math.hypot(nx, nz);
@@ -358,9 +361,6 @@ export class Player {
           this.lateJumpT = 0;
           this.sliding = false;
           this.feel.punch.kick(-6);
-        } else if (this.grapple.attached) {
-          this.grapple.launch();
-          this.jumpQueueT = 0;
         } else if (b.touchingWall && this.wallKickLockout <= 0 && !this.mantle) {
           b.vel.y = MOVE.wallKickUp;
           b.vel.x += b.wallFacing.x * MOVE.wallKickOut;
@@ -411,7 +411,7 @@ export class Player {
     this.carryMantle(dt);
 
     // --- integrate ----------------------------------------------------------
-    this.grapple.update(dt, input);
+    this.jet.update(dt, input);
     if (this.ladder) { /* the ladder holds you: climb() set the velocity */ }
     else if (!b.onGround || b.vel.y > 0) b.vel.y -= MOVE.gravity * dt;
     else b.vel.y = -2;                          // stick to slopes instead of hopping

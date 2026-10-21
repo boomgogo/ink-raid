@@ -1295,6 +1295,21 @@ await shot('game-dead');
 // need a MAIN MENU button to get back to the menu — without that the first Esc
 // freed the cursor mid-fight and paused nothing.
 {
+  // The quill's frame is drawn round the button, no bigger. `.ir-leave span` once matched the
+  // quill's own span too, put it back in the flow, and its frame grew to the panel's width: an
+  // empty box over MAIN MENU on the pause and death screens.
+  const framed = () => page.evaluate(() => {
+    const b = document.querySelector('#btnMenu');
+    const r = (e) => e.getBoundingClientRect();
+    const bb = r(b), qb = r(b.querySelector('.ir-quill svg')), lb = r(b.querySelector('span:not(.ir-quill)'));
+    return {
+      ok: qb.width <= bb.width + 1 && qb.height <= bb.height + 1 && lb.top >= bb.top && lb.bottom <= bb.bottom,
+      detail: `button ${Math.round(bb.width)}x${Math.round(bb.height)}, frame ${Math.round(qb.width)}x${Math.round(qb.height)}`,
+    };
+  });
+  const deathFrame = await framed();
+  check('MAIN MENU framed (death)', deathFrame.ok, deathFrame.detail);
+
   const menuFrom = async () => {
     await page.click('#btnMenu');
     await sleep(300);
@@ -1324,6 +1339,8 @@ await shot('game-dead');
     return { state: G.state, real };
   });
   check('losing the mouse pauses', lost.state === 'paused', `state=${lost.state} (${lost.real ? 'real' : 'stand-in'} pointer lock released)`);
+  const pauseFrame = await framed();
+  check('MAIN MENU framed (pause)', pauseFrame.ok, pauseFrame.detail);
 
   const fromPause = await menuFrom();
   check('MAIN MENU from pause', fromPause.state === 'menu' && fromPause.start && fromPause.alive === 0 && fromPause.waves === 'idle',

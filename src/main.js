@@ -9,6 +9,8 @@ import { TYPES } from './entities/enemies/types.js';
 import { Game } from './game.js';
 import { raycast } from './core/physics.js';
 import { difficulty, setDifficulty } from './core/difficulty.js';
+import { P3P2 } from '@p3p2/client';
+import { Net } from './net/room.js';
 
 // The ink pipeline, THE DESK, and a player you can move around it.
 // Weapons and enemies hang off `ctx` next.
@@ -35,6 +37,21 @@ ctx.player = player;
 // game entirely so a shot is never taken mid-wave.
 const headless = useCalib || params.has('shot') || params.has('cam');
 const game = headless ? null : new Game(ctx);
+
+// Friends on the same desk, through a p3p2 server (net/room.js). The library's entry is under
+// 2 KB; the rest loads when a room is opened. An ordinary visit asks no server anything. The 👥
+// panel has no button of its own here, as every corner of the HUD is taken: FRIENDS on the title,
+// pause and death screens opens it. Enter is the game's, not the chat's.
+if (game) {
+  const p3p2 = new P3P2({
+    game: { id: 'ink-raid', version: __BUILD__ },
+    ui: { button: false, chatKey: false },
+  });
+  game.net = new Net(game, p3p2);
+  game.roomChanged();
+  // back into the room after a reload; "Join?" for a page opened from an invite
+  p3p2.start().catch(() => {});
+}
 
 // ?debug=input: which device holds the trigger, and the raw events behind it.
 // The log starts now so the overlay has the events from before it loaded.
@@ -170,6 +187,7 @@ window.__ink = {
   player,
   input,
   game,
+  net: game?.net || null,
   shots: Object.keys(SHOTS),
   pose,
   poseLook,
@@ -192,7 +210,7 @@ window.__ink = {
     crouching: player.crouching,
     sprinting: player.sprinting,
     hopsLeft: player.airHops,
-    grapple: { attached: player.grapple.attached, stam: +player.grapple.stam.toFixed(2), target: player.grapple.targetValid },
+    jet: { burning: player.jet.burning, fuel: +player.jet.fuel.toFixed(3) },
     hp: Math.round(player.hp),
     fov: +camera.fov.toFixed(1),
     eyeY: +player.eye.y.toFixed(2),

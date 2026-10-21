@@ -14,11 +14,15 @@ import { DIFFICULTIES, difficulty, setDifficulty } from './core/difficulty.js';
 import { MenuFlight } from './world/flight.js';
 import { Planes, PLANES } from './entities/planes.js';
 import { INK } from './render/palette.js';
+import { MODIFIERS } from './entities/enemies/types.js';
 
 // The game: state machine, loadout, scoring, and the glue between the systems.
 //
 // States are menu -> playing -> dead, and the only thing that owns the mouse is
 // `playing`. Everything else is a screen you click through.
+//
+// With friends (net/room.js) the run is the room's, and one more state: `down`, out until the
+// next wave, with the desk going on around you. The desk does not stop for a pause either.
 
 // MEDIUM keeps the key the best score has always lived under.
 const bestKey = (d) => (d === 'medium' ? 'ink_best' : `ink_best_${d}`);
@@ -84,11 +88,18 @@ export class Game {
     ctx.planes = new Planes(ctx);
     this.planes = ctx.planes;
     this.pickups.onTouch = (item) => this.take(item);
+    this.pickups.onAsk = (q) => { if (this.canTake(q.item)) this.net?.horde.askTake(q); };
+    this.pickups.onChange = () => this.net?.horde.pickupsChanged();
     this.bandages = ITEMS.bandage.start;
     this.wrapT = 0;             // wrapping a bandage: seconds left
     this.bandageTip = false;
 
     this.state = 'menu';
+    // In a room: the Net (main.js sets it), the run this page is in, and whether it asked for one.
+    this.net = null;
+    this.runId = 0;
+    this.wantRun = false;
+    this.pausedFrom = 'playing';
     this.score = 0;
     this.kills = 0;
     this.combo = 1;
@@ -159,6 +170,14 @@ export class Game {
     };
 
     this.enemies.onFoeDown = (e, info) => {
+      this.pickups.onFoeDown(e);
+      // a friend's kill: in the feed, and theirs
+      const self = this.net?.room?.self.id;
+      if (info.by && info.by !== self) {
+        const who = this.net.room.members.find((m) => m.id === info.by);
+        hud.kill(`${e.t.name} ${info.crit ? 'headshot' : 'inked over'} by ${who ? who.name : 'a friend'}`);
+        return;
+      }
       this.kills++;
       this.chainClock = 3.2;
       this.combo = Math.min(9, this.combo + 1);
@@ -168,15 +187,15 @@ export class Game {
         : KILL_WORDS[Math.floor(Math.random() * KILL_WORDS.length)];
       hud.kill(`${e.t.name} ${word.toLowerCase()}`, pts);
       if (info.crit) hud.message('HEADSHOT');
-      this.pickups.onFoeDown(e);
     };
 
-    this.planes.onDown = (plane) => {
+    this.planes.onDown = (plane, by) => {
       this.effects.burst(plane.pos, new THREE.Vector3(0, 1, 0), 14, {
         speed: 7, size: 0.08, life: 0.6, ink: INK.PEN, gravity: 6, drag: 1.5, stretch: 0.4,
       });
       this.audio.impact();
-      if (this.state !== 'playing') return;
+      // a friend shot it down: the points are on their page
+      if (by || this.state !== 'playing') return;
       this.score += PLANES.score;
       hud.kill(`plane shot down, carrying ${plane.carry === 'stapler' ? 'a staple gun' : 'a bandage'}`, PLANES.score);
     };
@@ -197,10 +216,17 @@ export class Game {
     };
 
     this.waves.onWaveStart = (n, mod, boss, intro) => {
+      // whoever is down is back, at the start
+      this.revive();
       hud.showWave(n);
       hud.showTwist(mod);
       hud.message(boss ? 'BOSS' : `WAVE ${n}`, boss ? intro : mod || 'something just started moving on the desk');
       this.audio.wave();
+      if (this.net?.inRoom() && this.net.leads()) {
+        this.net.horde.wave('start', n, {
+          mod, boss, intro, mi: MODIFIERS.indexOf(this.waves.modifier), mods: { ...this.enemies.mods },
+        });
+      }
     };
     this.waves.onWaveClear = (n) => {
       // Reworded from the flagged "WAVE n CLEARED / catch your breath": the
@@ -215,6 +241,7 @@ export class Game {
       }
       this.grenades.count = GRENADE.carry.max;
       this.audio.wave();
+      if (this.net?.inRoom() && this.net.leads()) this.net.horde.wave('clear', n);
     };
   }
 
@@ -224,17 +251,31 @@ export class Game {
     this.state = 'menu';
     this.hud.setGameVisible(false);
     const diffs = {};
-    // PLAY (medium) before EASY, regardless of how DIFFICULTIES itself is
-    // ordered: it is the default/primary pick and must be the first button.
-    for (const d of ['medium', 'easy']) {
-      diffs[d] = {
-        label: DIFFICULTIES[d].label,
-        blurb: d === 'medium' ? 'stand on the desk for as long as it lets you' : 'lighter waves, softer hits',
-        best: this.best[d] || 0,
+    const room = this.net?.room;
+    const run = this.net?.runOn() ? this.net.run : null;
+    if (run) {
+      // A run is on in the room: one button, into it.
+      diffs[run.d] = {
+        label: 'JOIN',
+        blurb: `your friends are on wave ${Math.max(1, this.waves.wave)}${run.d === 'easy' ? ', easy' : ''}`,
+        best: 0,
       };
+    } else {
+      // PLAY (medium) before EASY, regardless of how DIFFICULTIES itself is
+      // ordered: it is the default/primary pick and must be the first button.
+      for (const d of ['medium', 'easy']) {
+        diffs[d] = {
+          label: DIFFICULTIES[d].label,
+          blurb: room
+            ? (d === 'medium' ? 'for everybody on this desk' : 'for everybody: lighter waves, softer hits')
+            : d === 'medium' ? 'stand on the desk for as long as it lets you' : 'lighter waves, softer hits',
+          best: room ? 0 : this.best[d] || 0,
+        };
+      }
     }
     this.hud.screens.menu({
-      diffs, selected: this.difficulty,
+      diffs, selected: run ? run.d : this.difficulty,
+      friends: this.friendsButton(),
       volume: this.volume, music: this.playMusic, sens: this.ctx.input.sens, invert: this.ctx.input.invert,
       howtoOpen: !!this.howtoOpen, touch: this.touch.enabled,
       onStart: (d) => this.startRun(d),
@@ -263,13 +304,36 @@ export class Game {
   }
 
   startRun(d = this.difficulty) {
-    if (DIFFICULTIES[d] && d !== this.difficulty) {
+    if (DIFFICULTIES[d] && d !== this.difficulty && !this.net?.runOn()) {
       this.difficulty = d;
       localStorage.setItem('ink_difficulty', d);
     }
-    setDifficulty(this.difficulty);
     // The focus is still on whatever setting was touched last, and a checkbox
     // with focus toggles on Space: the jump key.
+    document.activeElement?.blur?.();
+    // with friends, the run is the room's: the one that is on, or a new one for everybody
+    if (this.net?.inRoom()) {
+      this.audio.init();
+      return this.net.play(this.difficulty);
+    }
+    setDifficulty(this.difficulty);
+    this.newDesk();
+    this.beginRun(this.difficulty, 0);
+  }
+
+  /** The desk as a run starts on it: nobody on it, the waves about to come. Alone, or on the host. */
+  newDesk() {
+    this.grenades.live.length = 0;
+    this.pickups.reset();
+    this.enemies.clear();
+    this.waves.start();
+  }
+
+  /** This page's player, into a run: on the desk where it starts, with what it starts with. */
+  beginRun(d, id) {
+    setDifficulty(d);
+    this.runId = id;
+    this.wantRun = false;
     document.activeElement?.blur?.();
     this.audio.init();
     this.audio.setMusic(this.playMusic);
@@ -293,27 +357,26 @@ export class Game {
     }
     this.stapler.hidden = true;
     this.grenades.count = GRENADE.carry.max;
-    this.grenades.live.length = 0;
-    this.pickups.reset();
     this.bandages = ITEMS.bandage.start;
     this.wrapT = 0;
     this.runT = 0;
     this.selectWeapon(0);
-    this.enemies.clear();
-    this.waves.start();
-    this.hud.tip(this.touch.enabled
-      ? ['tap ', EM('LINE'), ', hold to reel it in']
-      : ['hold ', EM(this.ctx.input.key('grapple')), ' to pull yourself in on the line'], 6);
+    this.hud.showWave(this.waves.wave);
+    this.hud.tip(['hold ', EM(this.touch.enabled ? 'JET' : this.ctx.input.key('jet')), ' to fly; it refuels when you let go'], 6);
 
     if (!this.touch.enabled) grabPointer(this.ctx.renderer.canvas);
   }
 
   pause() {
-    if (this.state !== 'playing') return;
+    if (this.state !== 'playing' && this.state !== 'down') return;
+    this.pausedFrom = this.state;
     this.state = 'paused';
+    // nothing moves the player behind the panel: a burn left lit would hang in the air there
+    this.ctx.player.jet.cut();
     this.pausedAt = performance.now();
     this.hud.screens.pause({
       diffLabel: difficulty.label, score: this.score, wave: this.waves.wave,
+      shared: !!this.net?.inRoom(), friends: this.friendsButton(),
       onMainMenu: () => this.quitToMenu(),
       onBackdrop: () => this.resume(),
     });
@@ -321,13 +384,22 @@ export class Game {
   }
 
   resume() {
-    this.state = 'playing';
+    this.state = this.pausedFrom === 'down' ? 'down' : 'playing';
     this.hud.closeScreen();
     if (!this.touch.enabled) grabPointer(this.ctx.renderer.canvas);
   }
 
   die() {
-    if (this.state === 'dead') return;
+    if (this.state === 'dead' || this.state === 'down') return;
+    if (this.net?.inRoom() && this.net.runOn() && this.runId === this.net.run.id) {
+      // With friends: down, and back at the start of the next wave. The run goes on.
+      this.state = 'down';
+      this.wrapT = 0;
+      this.audio.gameOver();
+      this.effects.flash = 0.6;
+      this.hud.message('DOWN', 'back in when the next wave starts');
+      return;
+    }
     this.state = 'dead';
     this.waves.stop();
     this.audio.gameOver();
@@ -354,6 +426,14 @@ export class Game {
    */
   quitToMenu() {
     if (this.state !== 'paused' && this.state !== 'dead') return;
+    if (this.net?.inRoom()) {
+      // The run is the room's, and goes on without this player.
+      this.runId = 0;
+      this.wrapT = 0;
+      this.touch.clear();
+      document.exitPointerLock?.();
+      return this.showMenu();
+    }
     this.waves.stop();
     this.enemies.clear();
     this.grenades.live.length = 0;
@@ -365,6 +445,76 @@ export class Game {
     this.showMenu();
   }
 
+  // --- with friends (net/room.js) ---------------------------------------------
+
+  /** In a run: playing it, paused in it, or down in it. */
+  inRun() { return this.state === 'playing' || this.state === 'paused' || this.state === 'down'; }
+
+  /** FRIENDS on a screen: the 👥 panel, to open a room, invite, or see who is here. */
+  friendsButton() {
+    const net = this.net;
+    if (!net) return null;
+    const n = net.room ? net.room.members.length : 0;
+    return { label: n > 1 ? `FRIENDS · ${n} here` : 'FRIENDS', inRoom: !!net.room, onClick: () => net.open() };
+  }
+
+  /** A wave starts: whoever is down is back at the start, with full health. */
+  revive() {
+    const down = this.state === 'down' || (this.state === 'paused' && this.pausedFrom === 'down');
+    if (!down || !this.net?.runOn()) return;
+    this.ctx.player.respawn();
+    if (this.state === 'down') this.state = 'playing';
+    else this.pausedFrom = 'playing';
+  }
+
+  /** The room's run is over: everybody in it was down at once. */
+  runOver(run) {
+    this.runId = 0;
+    this.state = 'dead';
+    this.wrapT = 0;
+    this.touch.clear();
+    document.exitPointerLock?.();
+    this.hud.setGameVisible(false);
+    this.hud.screens.death({
+      diffLabel: DIFFICULTIES[run.d].label, waves: run.waves, kills: this.kills, score: this.score,
+      best: null, crew: run.kills, touch: this.touch.enabled, friends: this.friendsButton(),
+      onMainMenu: () => this.quitToMenu(),
+      onBackdrop: () => this.startRun(),
+    });
+  }
+
+  /** What changed in the room shows on the title screen: a run to join, who is here. */
+  roomChanged() {
+    if (this.state === 'menu') this.showMenu();
+  }
+
+  /** This page is in somebody else's room now: what it was playing alone stops. */
+  abandonRun() {
+    this.runId = 0;
+    this.waves.stop();
+    this.enemies.clear();
+    this.grenades.live.length = 0;
+    this.pickups.reset();
+    this.planes.reset();
+    this.wrapT = 0;
+    this.touch.clear();
+    document.exitPointerLock?.();
+    this.showMenu();
+  }
+
+  /** Out of the room: back to a desk of one's own, from the title screen. */
+  leftRoom() {
+    this.wantRun = false;
+    this.abandonRun();
+  }
+
+  /** Is there room for `item`? A guest asks before it asks the host. */
+  canTake(item) {
+    if (this.state !== 'playing') return false;
+    if (item === 'stapler') return this.stapler.mag < this.stapler.stats.ammo.carry;
+    return item === 'bandage' && this.bandages < ITEMS.bandage.max;
+  }
+
   /**
    * Tell a touchpad player why their gun may be firing by itself — once.
    *
@@ -374,7 +524,7 @@ export class Game {
    * fires while you only aim. The page receives the same mousedown a physical
    * click sends, so the game cannot filter it without eating real shots; what
    * it can do is say so. Scrolling is the one thing that gives a touchpad away
-   * (see Input._onWheel), and the tip waits until the opening grapple tip has
+   * (see Input._onWheel), and the tip waits until the opening jetpack tip has
    * had its turn.
    */
   touchpadTip() {
@@ -490,12 +640,17 @@ export class Game {
       else if (this.state === 'paused' && performance.now() - this.pausedAt > 250) this.resume();
     }
     if (this.state === 'dead' && input.pressed('jump')) this.startRun();
+    if (this.state === 'down' && input.pressed('pause')) this.pause();
 
     this.touch.update();
 
     // hitstop scales game time but not the effects that report it
     const scale = this.effects.timeScale(realDt);
     const dt = realDt * scale;
+    // With friends the desk is the room's, and goes on whatever this page is doing: net/room.js
+    // runs it, before and after this page's player moves.
+    const shared = !!this.net?.inRoom();
+    if (shared) this.net.before(dt);
 
     if (this.state === 'playing') {
       for (let i = 0; i < 5; i++) if (input.pressed(`slot${i + 1}`)) this.selectWeapon(i);
@@ -510,17 +665,19 @@ export class Game {
       this.updateWrap(dt, input);
       for (const w of this.weapons) w.lowered = this.wrapT > 0;
 
-      this.toys?.update(dt, ctx.level, this.walkers(true));
+      if (!shared) this.toys?.update(dt, ctx.level, this.walkers(true));
       p.update(dt, input);
       this.weapon.update(dt, input);
       // After the weapon, because the weapon owns how far into the aim it is.
       p.setFov(this.applyFov(p.baseFov));
       p.lookScale = this.lookScale();
       this.grenades.update(dt, input);
-      this.enemies.update(dt);
-      this.waves.update(dt);
-      this.pickups.update(dt, p);
-      this.planes.update(dt);
+      if (!shared) {
+        this.enemies.update(dt);
+        this.waves.update(dt);
+        this.pickups.update(dt, p);
+        this.planes.update(dt);
+      }
 
       this.chainClock -= realDt;
       if (this.chainClock <= 0) this.combo = 1;
@@ -535,7 +692,7 @@ export class Game {
       // Not behind the pause screen: enemies left running there kept shooting,
       // and a six-second pause with five alive took HP from 120 to 8. Losing
       // the mouse pauses, so an alt-tab did that.
-      if (this.state !== 'paused') {
+      if (this.state !== 'paused' && !shared) {
         // a capture tool that pins the camera wants the same frame every
         // time: the toys hold their starting pose for it
         if (!this.pinned) {
@@ -556,7 +713,9 @@ export class Game {
         this.flight.update(Math.min(realDt, 0.05), ctx.camera);
         this.weapon.root.visible = false;
       }
+      if (this.state === 'down') this.updateHud();
     }
+    if (shared) this.net.after(dt);
 
     // Visual decay on the held weapon runs in EVERY state and on real time —
     // see WeaponBase.tickFx. Putting it inside the `playing` branch is what
@@ -608,7 +767,7 @@ export class Game {
       w.firesRounds && w.scoped,
     );
     hud.showScope(w.firesRounds && w.scoped);
-    hud.setGrapple(p.grapple.targetValid, p.grapple.stam);
+    hud.setFuel(p.jet.fuelShown);
     hud.setFocus(w instanceof Katana ? w.focus : -1, w instanceof Katana && w.focusReady);
     hud.setGuard(w instanceof Katana ? w.guard : -1, w instanceof Katana && (w.brokenT > 0 || w.mustRelease));
 

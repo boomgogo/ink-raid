@@ -197,7 +197,6 @@ export class Builder {
     this.ladders = [];          // climbable volumes; see ladder()
     this.flights = [];          // each staircase's foot and top; see stairs()
     this.places = [];           // tops meant to be reachable; see `place`
-    this.anchors = [];          // grapple points
     this.spawns = [];           // the ring the establishing shots are taken from
     this.spawnPool = [];        // every open point enemies may come in at
     this.snipers = [];
@@ -951,7 +950,6 @@ export class Builder {
     return out;
   }
 
-  anchor(x, y, z) { this.anchors.push(new THREE.Vector3(x, y, z)); return this; }
   spawn(x, y, z) { this.spawns.push(new THREE.Vector3(x, y, z)); return this; }
   sniperNest(x, y, z) { this.snipers.push(new THREE.Vector3(x, y, z)); return this; }
   /** An item on the map. `name` says where, for `npm run reach`, which walks to every one. */
@@ -980,7 +978,6 @@ export class Builder {
       ladders: this.ladders,
       flights: this.flights,
       places: this.places,
-      anchors: this.anchors,
       spawns: this.spawns,
       spawnPool: this.spawnPool,
       snipers: this.snipers,

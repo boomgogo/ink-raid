@@ -76,7 +76,6 @@ export function layPendulum(b, x, z, facing) {
   b.cyl(post.x, 0.5, post.z, 0.5, P.pivot - 0.5 + 0.6, { ink: INK.PEN, seg: 12, tag: 'post' });
   const arm = at(0, 0);
   b.box(arm.x, P.pivot - 0.35, arm.z, 0.7, 0.7, 1.4, { ink: INK.BLACK, look: LOOK.SOLID, rotY: facing, tag: 'bracket' });
-  b.anchor(arm.x, P.pivot + 1, arm.z);
   const pivot = at(0, 0.9).setY(P.pivot);
   return { pivot, t, n, facing };
 }

@@ -51,12 +51,27 @@
     transition: opacity .35s ease;
   }
   #boot.gone { opacity: 0; pointer-events: none; }
+  #boot p { margin: 0; text-align: center; }
+  /* Where the game comes from, and where more are. Drawn in pen like the rest: underlined words in
+     the page's ink, no ribbon. */
+  #boot .ir-links { margin-top: 1.4em; font-size: clamp(13px, 2.2vw, 16px); letter-spacing: 0; }
+  .ir-links a { color: inherit; text-decoration-thickness: 1px; text-underline-offset: .18em; }
+  /* The build, small and faint in the bottom-left corner: the same place the game keeps it. */
+  .ir-version {
+    position: absolute; left: 2.2vw; bottom: .6vh; font-size: 11px; line-height: 1;
+    letter-spacing: .04em; opacity: .45; pointer-events: none;
+  }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 <div id="hud"></div>
-<div id="boot">setting up the desk&hellip;</div>
+<div id="boot">
+  <p>setting up the desk&hellip;</p>
+  <p class="ir-links"><a href="https://github.com/boomgogo/ink-raid" target="_blank" rel="noopener">fork me on GitHub</a>
+    &middot; <a href="https://maize.live" target="_blank" rel="noopener">more games on Maize.Live</a></p>
+  <span class="ir-version">__INK_VERSION__</span>
+</div>
 <script type="module" src="/src/main.js"></script>
 </body>
 </html>

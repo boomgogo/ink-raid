@@ -120,8 +120,7 @@ export class Hud {
 
         <div id="irGuard" class="ir-guard"></div>
         <div id="irWrap" class="ir-wrap"></div>
-        <div id="irGrapple" class="ir-grapple"></div>
-        <div id="irStam" class="ir-stam"><i id="irStamFill"></i></div>
+        <div id="irFuel" class="ir-fuel"><i id="irFuelFill"></i></div>
 
         <div id="irCross" class="ir-cross">
           <i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i>
@@ -152,8 +151,8 @@ export class Hud {
       weaponName: $('#irWeaponName'), hint: $('#irHint'), slots: $('#irSlots'),
       edge: $('#irEdge'), edgeFill: $('#irEdgeFill'), edgeReady: $('#irEdgeReady'),
       scope: $('#irScope'),
-      guard: $('#irGuard'), wrap: $('#irWrap'), grapple: $('#irGrapple'),
-      stam: $('#irStam'), stamFill: $('#irStamFill'),
+      guard: $('#irGuard'), wrap: $('#irWrap'),
+      fuel: $('#irFuel'), fuelFill: $('#irFuelFill'),
       cross: $('#irCross'), hits: $('#irHits'), dmg: $('#irDmg'),
       pips: $('#irPips'), pip: [...this.root.querySelectorAll('#irPips .ir-pip')],
       eye: $('#irEye'),
@@ -161,6 +160,9 @@ export class Hud {
     };
 
     this.screens = new Screens(this.root, () => this.clearMessage());
+    // The build, faint in the bottom-left corner under LIFE, in play and over the screens alike.
+    // index.html styles it: the boot splash shows it in the same place.
+    root.appendChild(el(`<div class="ir-version">${__VERSION__}</div>`));
   }
 
   // --- visibility -----------------------------------------------------------
@@ -325,21 +327,18 @@ export class Hud {
     this.el.cross.classList.toggle('ir-hidden', !!on);
   }
 
-  // --- grapple / stamina ------------------------------------------------------------
+  // --- jetpack fuel -----------------------------------------------------------------
 
-  setGrapple(state, stam) {
-    if (this._c.grap !== state) {
-      this._c.grap = state;
-      this.el.grapple.dataset.state = String(state);
-    }
-    const on = stam < 0.995;
-    if (this._c.stamOn !== on) { this._c.stamOn = on; this.el.stam.classList.toggle('ir-on', on); }
+  /** Shown while the tank is not full; red with half a second of burn left, or too little to light. */
+  setFuel(fuel) {
+    const on = fuel < 0.995;
+    if (this._c.fuelOn !== on) { this._c.fuelOn = on; this.el.fuel.classList.toggle('ir-on', on); }
     if (!on) return;
-    const s = q(Math.max(0, Math.min(1, stam)), 1 / 100);
-    if (this._c.stam !== s) {
-      this._c.stam = s;
-      this.el.stamFill.style.transform = `scaleX(${s})`;
-      this.el.stam.classList.toggle('ir-low', s < 0.25);
+    const s = q(Math.max(0, Math.min(1, fuel)), 1 / 100);
+    if (this._c.fuel !== s) {
+      this._c.fuel = s;
+      this.el.fuelFill.style.transform = `scaleX(${s})`;
+      this.el.fuel.classList.toggle('ir-low', s < 0.25);
     }
   }
 

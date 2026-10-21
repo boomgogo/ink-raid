@@ -145,6 +145,11 @@ export class Audio {
     this.noise({ dur: 0.05, freq: 500 + speed * 40, q: 2, type: 'bandpass', gain: 0.05, decay: 0.6 });
   }
 
+  /** One burst of the jetpack's hiss; it sends one every JET.hissEvery while it burns. */
+  jet() {
+    this.noise({ dur: 0.14, freq: 1500, q: 0.7, type: 'bandpass', gain: 0.05, decay: 0.85 });
+  }
+
   land(impact) {
     this.noise({ dur: 0.12, freq: 400 + impact * 500, q: 1.5, type: 'lowpass', gain: 0.06 + impact * 0.16 });
   }

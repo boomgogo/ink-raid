@@ -411,7 +411,7 @@ const passed = results.filter((r) => r.ok).length;
 console.log(`\n${passed}/${results.length} passed`);
 console.log(`
 Still needs a human with a phone — none of the above can answer these:
-  [ ] can you reach JUMP and HOOK without regripping?
+  [ ] can you reach UP and JET without regripping?
   [ ] does the floating stick appear under your thumb, or somewhere you have to reach for?
   [ ] is look sensitivity right, and can you make a small correction?
   [ ] does tap-to-fire misfire while you are turning?

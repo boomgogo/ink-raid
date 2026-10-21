@@ -21,7 +21,7 @@ export const ROI = { x0: 0.115, x1: 0.945, y0: 0.045, y1: 0.78 };
 // only where it means danger: low HP, RELOADING and the awareness eye
 // (bottom-left), the wave modifier (top-right), the boss bar (top-centre), an
 // empty weapon slot (bottom-right), and the crosshair-adjacent furniture
-// (hitmarkers, damage wedges, pips, a broken guard, low grapple stamina and
+// (hitmarkers, damage wedges, pips, a broken guard, low jetpack fuel and
 // the scope's centre dot), which all sit in one modest box around the middle
 // of the screen, so an enemy walking through the centre of frame is still
 // findable everywhere else.

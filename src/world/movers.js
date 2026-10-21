@@ -38,7 +38,7 @@ import { touchesColumn, shove, clearAbove } from '../core/physics.js';
 // otherwise shoved out through the world the way the mover was going, stopped
 // by walls like a walk, and given the mover's speed as it goes.
 //
-// None of it is in `places`, `anchors` or the spawn pool: those are asked of
+// None of it is in `places` or the spawn pool: those are asked of
 // the map at build time, and a mover is somewhere else a second later.
 
 const ONE = new THREE.Vector3(1, 1, 1);

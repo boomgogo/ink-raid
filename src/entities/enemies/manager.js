@@ -38,6 +38,25 @@ const CLIMB = {
 
 const MAX_BULLETS = 200;
 
+// Somebody for the horde to face when nobody is in the run: far under the desk, where nothing
+// sees it and nothing it fires lands. Only in a room; alone, the horde faces your player, up or down.
+const NOBODY = {
+  body: { pos: new THREE.Vector3(0, -1e4, 0), vel: new THREE.Vector3(), onGround: true, height: 1.7 },
+  center: new THREE.Vector3(0, -1e4, 0), eye: new THREE.Vector3(0, -1e4, 0),
+  alive: false, stance: 'still', speed: 0, crouching: false, sliding: false, nobody: true,
+};
+const _targets = [];
+const _players = [];
+/** Whichever of `players` is nearest `e`. */
+const nearest = (e, players) => {
+  let best = players[0], bd = Infinity;
+  for (const q of players) {
+    const d = q.body.pos.distanceToSquared(e.body.pos);
+    if (d < bd) { bd = d; best = q; }
+  }
+  return best;
+};
+
 // Melee: how much faster a blade closes from `lunge` out, how long the swing
 // down takes to draw, and how far past `range` a strike still lands once it
 // has wound up (you were in range when it started).
@@ -125,6 +144,11 @@ export class Enemies {
     this.mods = { speed: 1, damage: 1, hp: 1, count: 1, crit: 1, body: 1, heal: 0 };
     this.onFoeDown = null;
     this.onPlayerHit = null;
+    // In a room (net/horde.js): on the host, who else the figures can go for and how the others
+    // are told; on a guest, where the host says they are, and the host to tell what lands on them.
+    // Alone it is null, and nothing below changes.
+    this.net = null;
+    this.nextId = 1;
     this.stance = 'still';
     this.contactT = 0;          // since anything hunting last saw you
     this.noiseAt = new THREE.Vector3();
@@ -170,6 +194,7 @@ export class Enemies {
     this.ctx.scene.add(fig.root);
 
     const e = {
+      id: this.nextId, target: null, targetT: 0,
       type: typeKey, t, fig,
       body: newBody(at, 0.34 * (t.frame.scale || 1), 1.7 * (t.frame.scale || 1), 0.6),
       hp: t.reward.hp * this.mods.hp * difficulty.enemyHpMul,
@@ -227,11 +252,52 @@ export class Enemies {
     // a sniper on a nest looks out over the desk, not at the wall behind it
     if (t.role?.stationary) e.lookYaw = Math.atan2(at.x, at.z);
     e.yaw = e.lookYaw;
+    this.nextId = (this.nextId % 65535) + 1;
     this.list.push(e);
     this.alive++;
     if (o.mind === 'hunt' || this.alwaysHunts(e)) this.hunt(e, false);
     e.markT = 0;
     return e;
+  }
+
+  /**
+   * Everybody the horde can go for. Alone, your player, up or down; in a room, the players who
+   * are up and in the run, which between runs is nobody.
+   */
+  players() {
+    if (!this.net) return [this.ctx.player];
+    _players.length = 0;
+    return this.net.targets(_players);
+  }
+
+  /** The figure with this id, standing or not, or null. */
+  byId(id) {
+    for (const e of this.list) if (e.id === id) return e;
+    return null;
+  }
+
+  /**
+   * Who `e` goes for. Alone, you. In a room, the nearest of the players who are up and in the
+   * run, held for a moment so it does not dither between two, and whoever just hurt it.
+   */
+  targetOf(e, dt) {
+    const p = this.ctx.player;
+    if (!this.net) return (e.target = p);
+    _targets.length = 0;
+    const list = this.net.targets(_targets);
+    if (!list.length) return (e.target = NOBODY);
+    e.targetT -= dt;
+    if (e.target && e.targetT > 0 && list.includes(e.target)) return e.target;
+    let best = list[0], bd = Infinity;
+    for (const q of list) {
+      // the one it is after already counts as a little nearer
+      const d = q.body.pos.distanceToSquared(e.body.pos) * (q === e.target ? 0.6 : 1);
+      if (d < bd) { bd = d; best = q; }
+    }
+    if (best !== e.target && e.mind === 'hunt') e.lastKnown.copy(best.center);
+    e.target = best;
+    e.targetT = 1.5;
+    return best;
   }
 
   // --- queries used by the weapons -----------------------------------------
@@ -324,17 +390,34 @@ export class Enemies {
   /** Knocked off balance by a parry: it stops, reels back, and does nothing for `seconds`. */
   stagger(e, seconds) {
     if (!e.alive) return;
+    if (this.net?.follows) return this.net.stagger(e, seconds);
     e.staggerT = Math.max(e.staggerT, seconds);
     e.chargeState = null;
   }
 
+  /**
+   * `info.by`: in a room, the member whose hit it was, when it is not this page's player. Their
+   * page has shown the hit already (`quiet`), and the kill is theirs.
+   */
   damage(e, amount, info) {
     if (!e.alive) return;
+    const fx = this.ctx.effects;
+    if (this.net?.follows) {
+      // A guest: the hit is drawn now, and the host takes the health off and says if it went down.
+      e.hurt = 1;
+      fx.hit(info.point, info.dir, info.crit);
+      fx.stop(0.02, 0.5);
+      this.ctx.audio?.hitmark(info.crit);
+      this.ctx.hud?.markHit(info.crit ? 'crit' : 'body');
+      this.net.hit(e, amount, info);
+      return;
+    }
+    const by = info.by ? this.net?.proxyOf(info.by) : null;
+    if (by) { e.target = by; e.targetT = 3; }
     this.hunt(e, true);
     this.contactT = 0;
     e.hp -= amount * (info.crit ? this.mods.crit : this.mods.body);
     e.hurt = 1;
-    const fx = this.ctx.effects;
     fx.hit(info.point, info.dir, info.crit);
     if (e.hp <= 0) {
       e.alive = false;
@@ -343,20 +426,25 @@ export class Enemies {
       fx.burst(info.point, info.dir, 16, {
         speed: 9, size: 0.07, life: 0.5, ink: INK.RED, gravity: 14, drag: 2.2, stretch: 0.22,
       });
-      fx.stop(e.t.role?.boss ? 0.16 : 0.055, 0.1);
-      fx.kick(e.t.role?.boss ? 1.2 : 0.18);
-      this.ctx.audio?.kill();
-      const p = this.ctx.player;
-      if (this.mods.heal && p?.alive) p.hp = Math.min(p.maxHp, p.hp + this.mods.heal);
+      if (!info.quiet) {
+        fx.stop(e.t.role?.boss ? 0.16 : 0.055, 0.1);
+        fx.kick(e.t.role?.boss ? 1.2 : 0.18);
+        this.ctx.audio?.kill();
+        const p = this.ctx.player;
+        if (this.mods.heal && p?.alive) p.hp = Math.min(p.maxHp, p.hp + this.mods.heal);
+      }
       this.onFoeDown?.(e, info);
+      this.net?.downed?.(e, info);
     } else {
-      fx.stop(0.02, 0.5);
-      this.ctx.audio?.hitmark(info.crit);
       // knock them back a touch, so shooting something visibly moves it
       e.body.vel.addScaledVector(info.dir, info.crit ? 3.5 : 2.0);
-      this.ctx.hud?.markHit(info.crit ? 'crit' : 'body');
+      if (!info.quiet) {
+        fx.stop(0.02, 0.5);
+        this.ctx.audio?.hitmark(info.crit);
+        this.ctx.hud?.markHit(info.crit ? 'crit' : 'body');
+      }
     }
-    if (!e.alive) this.ctx.hud?.markHit('kill');
+    if (!e.alive && !info.quiet) this.ctx.hud?.markHit('kill');
   }
 
   // --- update ---------------------------------------------------------------
@@ -367,18 +455,26 @@ export class Enemies {
     this.stance = stanceOf(p);
     this.contactT += dt;
     this.highlightT = Math.max(0, this.highlightT - dt);
-    if (this.alive > 0 && this.alive <= 2 && this.contactT > AWARE.straggle) {
+    const net = this.net;
+    // In a room the host's page runs the figures for everybody, and these rules with them: a
+    // guest's page only draws what the host says. "You" is then every player up and in the run,
+    // and "unfound" is unfound by all of them: `contactT` is reset by a figure seeing any one.
+    const players = net?.follows ? null : this.players();
+    if (players?.length && this.alive > 0 && this.alive <= 2 && this.contactT > AWARE.straggle) {
       for (const e of this.list) {
         if (!e.alive) continue;
         if (e.t.role?.stationary) {
           // a sniper on a nest nobody can see from where you are (the mug's,
           // seen only over its rim) moves to one that can see you, and fires
           // from there: the round in the air is what gives it away
-          if (!this.canSee(e, p) && (!e.straggling || e.mindT > AWARE.straggleEvery * 2)) this.renest(e, p);
+          if (!players.some((q) => this.canSee(e, q)) && (!e.straggling || e.mindT > AWARE.straggleEvery * 2)) this.renest(e, players);
           continue;
         }
         if (e.mind === 'hunt') continue;
-        if (e.mind !== 'search' || e.mindT > AWARE.straggleEvery) { this.search(e, p.center); e.straggling = true; }
+        if (e.mind !== 'search' || e.mindT > AWARE.straggleEvery) {
+          this.search(e, nearest(e, players).center);
+          e.straggling = true;
+        }
       }
     }
     if (this.stance === 'sprint') this.noiseAt.copy(p.center);
@@ -398,14 +494,19 @@ export class Enemies {
         }
         continue;
       }
-      this.think(e, dt, p);
-      this.trapped(e, dt, p);
+      if (net?.follows) {
+        net.drive(e, dt);
+        continue;
+      }
+      this.think(e, dt, this.targetOf(e, dt));
+      this.trapped(e, dt, players);
     }
-    this.updateBullets(dt, p);
+    // Rounds are judged on every page for its own player only, and not while it is out of the run.
+    this.updateBullets(dt, !net || net.mine() ? p : NOBODY);
 
     let hunters = 0;
     this.pips.length = 0;
-    for (const e of this.list) if (e.alive && e.mind === 'hunt') hunters++;
+    for (const e of this.list) if (e.alive && e.mind === 'hunt' && e.target === p) hunters++;
     this.hunters = hunters;
     if (this.alive > 0 && this.alive <= 2 && this.contactT > AWARE.pips) {
       for (const e of this.list) if (e.alive) this.pips.push(e);
@@ -413,19 +514,24 @@ export class Enemies {
     this.marks?.update(this.list);
   }
 
-  /** A straggling sniper to a free nest with a line to you; see AWARE.straggle. */
-  renest(e, p) {
+  /**
+   * A straggling sniper to a free nest with a line to you (with friends, to any of `players`),
+   * facing whoever it sees from there; see AWARE.straggle.
+   */
+  renest(e, players) {
     e.straggling = true;
     e.mindT = 0;
-    const free = (this.ctx.level.snipers || []).filter((n) => {
-      if (this.list.some((o) => o.alive && o !== e && o.body.pos.distanceTo(n) < 2)) return false;
+    const sees = (n, q) => {
       _v.set(n.x, n.y + 1.5, n.z);
-      _d.copy(p.center).sub(_v);
+      _d.copy(q.center).sub(_v);
       const d = _d.length();
       return !raycast(this.ctx.level, _v, _d.multiplyScalar(1 / d), d - 0.5);
-    });
+    };
+    const free = (this.ctx.level.snipers || []).filter((n) =>
+      !this.list.some((o) => o.alive && o !== e && o.body.pos.distanceTo(n) < 2) && players.some((q) => sees(n, q)));
     const n = free[Math.floor(Math.random() * free.length)];
     if (!n) return;
+    const p = players.find((q) => sees(n, q));
     e.body.pos.set(n.x, n.y + 0.1, n.z);
     e.body.vel.set(0, 0, 0);
     e.fig.root.position.copy(e.body.pos);
@@ -434,8 +540,11 @@ export class Enemies {
     this.redrawn = (this.redrawn || 0) + 1;
   }
 
-  /** See TRAPPED: one that has been going nowhere for too long is drawn again elsewhere. */
-  trapped(e, dt, p) {
+  /**
+   * See TRAPPED: one that has been going nowhere for too long is drawn again elsewhere, away
+   * from and out of sight of every one of `players`.
+   */
+  trapped(e, dt, players) {
     if (e.ladder || e.t.role?.stationary) { e.stillAt = null; return; }
     if (!e.stillAt || e.body.pos.distanceTo(e.stillAt) > TRAPPED.moved) {
       (e.stillAt ||= new THREE.Vector3()).copy(e.body.pos);
@@ -448,11 +557,14 @@ export class Enemies {
     if (e.stillT < TRAPPED.after || e.tryT < TRAPPED.trying) return;
     const pool = this.ctx.level.spawnPool || [];
     const out = [];
-    for (const q of pool) {
-      if (Math.hypot(q.x - p.body.pos.x, q.z - p.body.pos.z) < TRAPPED.away) continue;
+    const seen = (q, p) => {
       _d.set(q.x, q.y + 1.2, q.z).sub(p.eye);
       const d = _d.length();
-      if (!raycast(this.ctx.level, p.eye, _d.multiplyScalar(1 / d), d)) continue;   // in your sight
+      return !raycast(this.ctx.level, p.eye, _d.multiplyScalar(1 / d), d);
+    };
+    for (const q of pool) {
+      if (players.some((p) => Math.hypot(q.x - p.body.pos.x, q.z - p.body.pos.z) < TRAPPED.away)) continue;
+      if (players.some((p) => seen(q, p))) continue;   // in somebody's sight
       out.push(q);
     }
     const q = out[Math.floor(Math.random() * out.length)];
@@ -492,7 +604,11 @@ export class Enemies {
     // cone and its range, which is most of the time not at all.
     if (e.mind !== 'hunt' && this.alwaysHunts(e)) this.hunt(e, false);
     let sees;
-    if (e.mind === 'hunt') {
+    if (p.nobody) {
+      // nobody to find: it looks about where it stands
+      sees = false;
+      if (e.mind === 'hunt' && !this.alwaysHunts(e)) this.search(e, e.body.pos);
+    } else if (e.mind === 'hunt') {
       sees = this.canSee(e, p);
       if (sees || this.highlightT > 0) {
         // highlighted, it knows where you are whether it can see you or not
@@ -662,7 +778,7 @@ export class Enemies {
       if (sees && dist < t.pace.engage) {
         aiming = true;
         e.spotT += dt;
-        if (e.spotT >= t.attack.spotTime) this.highlight();
+        if (e.spotT >= t.attack.spotTime) this.highlight(p);
       } else {
         e.spotT = Math.max(0, e.spotT - dt);
       }
@@ -718,13 +834,17 @@ export class Enemies {
     const reel = staggered ? Math.min(1, e.staggerT * 2.5) : 0;
     e.cutT = Math.max(0, e.cutT - dt);
     const windup = Math.max(1e-3, (t.attack.windup || 0) * difficulty.windupMul);
+    // kept on the figure, for a host to tell the others how to draw it
+    e.aiming = aiming;
+    e.raise = e.chargeState === 'wind' ? 1
+      : e.windT > 0 ? Math.min(1, 0.25 + 1.6 * (1 - e.windT / windup)) : e.cutT > 0 ? 1 : 0;
+    e.cut = e.cutT > 0 ? 1 - e.cutT / CUT : 0;
     pose(e.fig.J, {
       t: e.phase + e.stateT,
       walk: e.walk,
       aim: aiming,
-      raise: e.chargeState === 'wind' ? 1
-        : e.windT > 0 ? Math.min(1, 0.25 + 1.6 * (1 - e.windT / windup)) : e.cutT > 0 ? 1 : 0,
-      cut: e.cutT > 0 ? 1 - e.cutT / CUT : 0,
+      raise: e.raise,
+      cut: e.cut,
       lean: e.walk * 0.25 - reel * 0.9 + (e.chargeState === 'run' ? 0.7 : 0),
       hurt: Math.max(e.hurt, reel),
     });
@@ -737,8 +857,14 @@ export class Enemies {
    * You are highlighted: every enemy on the desk knows where you are for
    * HIGHLIGHT.hold seconds after a highlighter last had you in sight.
    */
-  highlight() {
-    if (this.highlightT <= 0) this.ctx.hud?.message('HIGHLIGHTED', 'the whole page knows where you are — break its line of sight');
+  highlight(p) {
+    if (p?.remote) {
+      // somebody else's player: their page says so, once a second at most
+      const now = performance.now();
+      if (!(p.toldHighlit > now - 1000)) { p.toldHighlit = now; this.net?.highlight?.(p); }
+    } else if (this.highlightT <= 0) {
+      this.ctx.hud?.message('HIGHLIGHTED', 'the whole page knows where you are — break its line of sight');
+    }
     this.highlightT = HIGHLIGHT.hold;
   }
 
@@ -784,7 +910,7 @@ export class Enemies {
     if (!e.chargeHit && p.center.distanceTo(e.center) < c.reach) {
       e.chargeHit = true;
       // bowled over, unless the katana took it
-      if (this.meleeHit(e, p)) p.launch?.(e.chargeDir.x * 11, 6, e.chargeDir.z * 11, 0.3);
+      this.meleeHit(e, p, [e.chargeDir.x * 11, 6, e.chargeDir.z * 11]);
     }
     if (b.touchingWall && c.duration - e.chargeT > 0.12) {
       // Into a wall: it leaves its mark on the page, and stands there dazed.
@@ -824,7 +950,7 @@ export class Enemies {
    */
   perceive(e, dt, p, dist) {
     const t = e.t;
-    const st = this.stance;
+    const st = p.remote ? p.stance : this.stance;
     let range = (t.role?.stationary ? (st === 'crouch' ? AWARE.sniperCrouched : AWARE.sniperSight) : AWARE.sight[st]) * difficulty.sight;
     let sees = false, rate = 0;
     if (dist < range) {
@@ -857,7 +983,7 @@ export class Enemies {
    */
   hunt(e, tell = true) {
     if (!e.alive) return;
-    const p = this.ctx.player;
+    const p = e.target || this.ctx.player;
     if (p) e.lastKnown.copy(p.center);
     e.blindFor = 0;
     e.notice = 1;
@@ -893,14 +1019,19 @@ export class Enemies {
    * everything that hears it hunts you. A `bang` is only where something went
    * off, and whatever hears it goes to look.
    */
-  noise(pos, radius, kind = 'shot') {
+  noise(pos, radius, kind = 'shot', who = null) {
+    // a guest's gun is heard on the host's page, where the figures are
+    if (this.net?.follows) return this.net.noise(pos, radius, kind);
     const r = radius * difficulty.sight;
     if (kind === 'shot') this.noiseAt.copy(pos);
     for (const e of this.list) {
       if (!e.alive || e.mind === 'hunt') continue;
       if (e.center.distanceTo(pos) >= r) continue;
-      if (kind === 'shot') this.hunt(e, true);
-      else this.search(e, pos);
+      if (kind === 'shot') {
+        // in a room: whoever fired is who it goes for
+        if (who) { e.target = who; e.targetT = 3; }
+        this.hunt(e, true);
+      } else this.search(e, pos);
     }
   }
 
@@ -1031,6 +1162,7 @@ export class Enemies {
 
   shoot(e, p) {
     const t = e.t;
+    const fired = [];
     const s = t.attack.spread || 0.04;
     const speed = t.attack.muzzle || 40;
     // Pellets past their range are gone rather than drifting on across the map.
@@ -1050,6 +1182,7 @@ export class Enemies {
         _d.z += (Math.random() - 0.5) * s * 2;
       }
       _d.normalize();
+      fired.push(this.bullets.length);
       this.bullets.push({
         pos: e.eye.clone().addScaledVector(_d, 0.5),
         vel: _d.clone().multiplyScalar(speed),
@@ -1063,15 +1196,27 @@ export class Enemies {
       });
     }
     if (fan) e.fanFlip = !e.fanFlip;
+    // in a room, every page flies these rounds too
+    if (this.net?.shot && fired.length) this.net.shot(e, fired.map((i) => this.bullets[i]));
     this.ctx.effects.burst(e.eye.clone().addScaledVector(_to, 0.55), _to, t.attack.pellets || fan ? 5 : 2, {
       speed: 3, size: 0.03, life: 0.1, ink: INK.ORANGE,
     });
     this.ctx.audio?.foeShot();
   }
 
-  /** Returns whether it landed: false if the katana blocked or parried it. */
-  meleeHit(e, p) {
-    if (!p.alive) return false;          // see updateBullets: nothing lands on the death screen
+  /**
+   * Returns whether it landed: false if the katana blocked or parried it. `launch`: a charge
+   * that lands throws you, [vx, vy, vz]. On somebody else's player the host does not know: that
+   * player's page decides, and the blow counts as landed here.
+   */
+  meleeHit(e, p, launch) {
+    // See updateBullets: nothing lands on the death screen, nor on a friend who is down.
+    if (!p.alive) return false;
+    if (p.remote) {
+      this.contactT = 0;
+      this.net?.strike?.(e, p, (e.t.attack.damage || 10) * this.mods.damage, launch);
+      return true;
+    }
     // The katana gets first refusal, as it does on rounds. Blocked or parried,
     // the striker is shoved back off the blade; a parry has also staggered it.
     const verdict = this.ctx.onIncomingMelee?.(e);
@@ -1092,6 +1237,7 @@ export class Enemies {
     this.ctx.effects.hurt = 1;
     this.ctx.effects.kick(0.3);
     this.ctx.audio?.playerHurt();
+    if (launch) p.launch?.(launch[0], launch[1], launch[2], 0.3);
     return true;
   }
 
@@ -1099,8 +1245,11 @@ export class Enemies {
     const bs = this.bullets;
     for (let i = bs.length - 1; i >= 0; i--) {
       const bu = bs[i];
-      bu.life -= dt;
-      _v.copy(bu.vel).multiplyScalar(dt);
+      // A round fired on another page has been flying for `lag` already: this step makes it up.
+      const bdt = dt + (bu.lag || 0);
+      bu.lag = 0;
+      bu.life -= bdt;
+      _v.copy(bu.vel).multiplyScalar(bdt);
       const step = _v.length();
       _d.copy(_v).multiplyScalar(1 / Math.max(1e-6, step));
 

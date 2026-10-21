@@ -26,9 +26,11 @@
     "reach": "node tools/reach.mjs",
     "distcheck": "node tools/distcheck.mjs",
     "toys": "node tools/toys.mjs",
-    "render": "node tools/render.mjs"
+    "render": "node tools/render.mjs",
+    "coop": "node tools/coop.mjs"
   },
   "dependencies": {
+    "@p3p2/client": "^0.1.1",
     "three": "^0.170.0"
   },
   "devDependencies": {

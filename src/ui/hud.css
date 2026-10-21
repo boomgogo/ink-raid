@@ -138,7 +138,7 @@
 .ir-cross.ir-katana .t, .ir-cross.ir-katana .b, .ir-cross.ir-katana .l, .ir-cross.ir-katana .r { display: none; }
 .ir-cross.ir-katana .slit { display: block; left: -1px; top: calc(var(--r) * -1px); width: 2px; height: calc(var(--r) * 2px); }
 
-.ir-hits, .ir-dmg, .ir-pips, .ir-guard, .ir-wrap, .ir-grapple, .ir-stam { width: 1px; height: 1px; }
+.ir-hits, .ir-dmg, .ir-pips, .ir-guard, .ir-wrap, .ir-fuel { width: 1px; height: 1px; }
 
 .ir-hit { border-radius: 2px; filter: drop-shadow(0 0 2px var(--ir-paper)); }
 .ir-hit-body { width: 10px; height: 10px; background: var(--ir-accent); transform: translate(-50%, -50%) rotate(45deg) scale(1.4); animation: ir-hitpop .28s ease-out forwards; }
@@ -182,21 +182,14 @@
 .ir-wrap { width: 56px; height: 56px; background: conic-gradient(var(--ir-accent) calc(var(--f) * 360deg), rgba(19,19,24,.12) 0); }
 .ir-wrap.ir-on { opacity: .95; }
 
-.ir-grapple {
-  width: 46px; height: 46px; border-radius: 50%; opacity: 0;
-  border: 2.5px dashed var(--ir-pen); transition: opacity .12s, transform .15s;
-}
-.ir-grapple[data-state='1'] { opacity: .85; animation: ir-grapplespin 2.4s linear infinite; }
-.ir-grapple[data-state='2'] { opacity: 1; border-style: solid; width: 40px; height: 40px; animation: none; }
-@keyframes ir-grapplespin { from { transform: translate(-50%, -50%) rotate(0deg) scale(.9); } to { transform: translate(-50%, -50%) rotate(360deg) scale(.98); } }
-
-.ir-stam {
+/* the jetpack's fuel, under the crosshair while the tank is not full */
+.ir-fuel {
   top: 40px; width: 52px; height: 5px; border: 1.3px solid var(--ir-pen); border-radius: 2px;
   opacity: 0; overflow: hidden; background: rgba(19,19,24,.08);
 }
-.ir-stam.ir-on { opacity: .9; }
-.ir-stam i { display: block; height: 100%; width: 100%; background: var(--ir-pen); transform-origin: left; }
-.ir-stam.ir-low i { background: var(--ir-danger); }
+.ir-fuel.ir-on { opacity: .9; }
+.ir-fuel i { display: block; height: 100%; width: 100%; background: var(--ir-pen); transform-origin: left; }
+.ir-fuel.ir-low i { background: var(--ir-danger); }
 
 /* sniper scope: sits BELOW the readouts above (z-index), above the world */
 .ir-scope { position: absolute; inset: 0; left: 0; top: 0; transform: none; opacity: 0; pointer-events: none; z-index: 1; }
@@ -317,8 +310,29 @@
   position: relative; font: inherit; font-weight: bold; color: var(--ir-pen); background: none;
   border: none; cursor: pointer; padding: .7em 1.6em; margin-top: .6em;
 }
-.ir-leave span { position: relative; }
+/* The label only: the quill's own span has to stay absolute, or its frame grows to the size of the
+   panel and pushes the label below it. That frame was the empty box on the pause screen. */
+.ir-leave > span:not(.ir-quill) { position: relative; }
 .ir-leave:hover .ir-quill-fill { opacity: .25; }
+
+/* fork me on GitHub, more games: index.html draws the links themselves, for the boot splash too */
+.ir-panel .ir-links { margin: 1.2em 0 0; font-size: .82em; opacity: .85; }
+
+/* the build (index.html places it): over the screens as well as the run */
+#hud .ir-version { z-index: 6; }
+
+/* With friends (net/): FRIENDS beside MAIN MENU, everybody's kills when a run is over, and each
+   friend's name over their head, in pen. */
+.ir-friends { margin-left: .4em; }
+.ir-p3p2 { margin: .5em 0 0; font-size: .82em; opacity: .85; }
+.ir-p3p2 a { color: inherit; text-decoration-thickness: 1px; text-underline-offset: .18em; }
+.ir-crew b { margin-right: .2em; }
+.ir-tags { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.ir-tag {
+  position: absolute; left: 0; top: 0; white-space: nowrap; font-size: var(--ir-fs);
+  color: var(--ir-pen); text-shadow: 0 0 3px var(--ir-paper), 0 0 6px var(--ir-paper);
+}
+.ir-tag-down { opacity: .55; text-decoration: line-through; }
 
 /* =============================================================== responsive */
 
@@ -364,7 +378,7 @@
 
 /* FIRE, SWAP and HEAL have no per-button inline style (unlike the BTNS array
    in touch.js), so their size and position live here. Placed clear of the
-   jump/crouch/grapple/reload/grenade cluster (see BTNS): FIRE anchors the
+   jump/crouch/jet/reload/grenade cluster (see BTNS): FIRE anchors the
    bottom-right corner, big enough to rest a thumb on; SWAP and HEAL are small
    satellites above it, stacked so neither the cluster nor each other overlap. */
 .tfire {
@@ -374,8 +388,8 @@
 }
 .tfire.down { background: var(--ir-danger); color: var(--ir-paper); }
 
-/* Tucked into the gap between DUCK and LINE rather than stacked on the
-   right edge, which put it on top of LINE (grapple). */
+/* Tucked into the gap between DUCK and JET rather than stacked on the
+   right edge, which put it on top of JET. */
 .tswap { right: 109px; bottom: 132px; width: 44px; height: 44px; font-size: 9px; }
 
 .theal {

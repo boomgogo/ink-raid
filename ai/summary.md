@@ -24,7 +24,8 @@ From `CLAUDE.md`:
 | `render/` | the renderer (below) |
 | `world/` | the desk: `build.js` (geometry and colliders), `map_desk.js` (the level), `movers.js` (things that move and carry you), the train, the pendulum and cradle, the sky, the title-screen flight, a calibration scene |
 | `core/` | physics and collision, input, waves, difficulty, springs |
-| `entities/` | the player, the grapple, weapons, enemies (types, rigs, AI), pickups, paper planes |
+| `entities/` | the player, the jetpack, weapons, enemies (types, rigs, AI), pickups, paper planes |
+| `net/` | co-op through p3p2: `room.js` (the room and its run), `crew.js` (the other players), `horde.js` (the host's figures, rounds, waves and pickups, as the others see them), `wire.js` (the binary reports) |
 | `fx/` | particles, tracers and decals; synthesised audio |
 | `ui/` | the HUD, the touch controls, hand-drawn buttons |
 
@@ -60,11 +61,31 @@ paper.
 - **Types and bosses:** they are listed in `entities/enemies/types.js`.
 - **Difficulty:** PLAY or EASY (`core/difficulty.js`).
 - **Pickups:** bandages heal. Shooting down a paper plane drops a bandage or a staple gun.
+- **The jetpack** (`entities/jetpack.js`, `JET`) replaced the grapple, on the same keys. Hold to fly;
+  the thrust is throttled to a 9 m/s climb, and a tank lasts 2.1 s: about 17 m up from standing, a
+  metre over the highest place. It refuels whenever it is not burning, in the air too.
+- **Co-op** through a p3p2 server (`net/`, from the fork at `~/Repos/p3p2_test_repos/ink-raid`):
+  - FRIENDS on the title, pause and death screens opens p3p2's panel, with a link to p3p2.me
+    beside it until the page is in a room;
+  - the run is the room's: PLAY starts it for everybody, the others get JOIN;
+  - each player past the first adds half a wave (`CREW` in `core/waves.js`);
+  - down is out until the next wave; the run is over when everybody here is down at once;
+  - the host's page runs the figures, the waves, the planes and the pickups; the others draw them
+    140 ms in the past and send the host their hits;
+  - when the host leaves, the next player takes the figures over;
+  - alone, the page loads p3p2's 2 KB entry and asks no server anything.
+- **The build** shows in the bottom-left corner as `v.` and four characters of its commit
+  (`vite.config.js`), on the boot splash too. p3p2's game version is 12 characters of the commit,
+  plus the build time when the tree is dirty.
+- **Links** to the GitHub repository and to Maize.Live sit on the boot splash and the title and
+  pause screens.
 
 ## Tools
 
 See the table in `README.md`. The browser tools need Chrome and `npm run preview` on port 4173,
-and must run one at a time. `compare.mjs` holds the style contract (paper, ink, dot grid, ink load)
+and must run one at a time. `tools/coop.mjs` (`npm run coop`) also needs a p3p2 checkout at
+`~/Repos/p3p2` (or `P3P2_DIR`), whose server it starts; it drives five or six Chrome windows into
+one room. `compare.mjs` holds the style contract (paper, ink, dot grid, ink load)
 and the figure-legibility band. Both are measured from this build.
 
 ## The bot and the recordings
@@ -114,6 +135,8 @@ and the figure-legibility band. Both are measured from this build.
 | which enemy types come in which wave | `DEBUT`, `WEIGHT_CURVE` |
 | wave modifiers | `MODIFIERS` |
 | player movement | `entities/player.js` `MOVE`, `MANTLE`, `LADDER` |
+| the jetpack | `entities/jetpack.js` `JET` |
+| co-op wave size | `core/waves.js` `CREW` |
 | body size | `core/physics.js` `PLAYER_BODY` |
 | difficulty | `core/difficulty.js` |
 
@@ -141,6 +164,10 @@ Found by the bot's runs (see `ai/next_1.md`), all in `entities/enemies/manager.j
   somewhere open, out of sight. One was found wedged under the big pencil, where it could not be
   seen or shot.
 - **After death**, rounds and blades no longer land on the player.
+- **In co-op** these run on the host's page only, for every player: "unfound" is unfound by all of
+  them, a straggler goes looking for the nearest, a nest sniper moves to a nest that sees anyone,
+  and a trapped figure is redrawn out of everybody's sight. A player who is down is nobody's
+  target, and no round is judged on their page.
 
 ## Known issues and next steps
 
@@ -159,3 +186,9 @@ Found by the bot's runs (see `ai/next_1.md`), all in `entities/enemies/manager.j
   - `npm run perf` measures 1280x800.
   - A newer integrated GPU is two to three times faster.
 - **Off-screen damage:** about 40% of the bot's hits came from enemies not on screen.
+- **Desktop frame budget:** `npm run perf`'s worst 1% of desktop frames sits on its 33 ms limit
+  (34.1 ms before plan 2), and has since itr 1.
+- **Co-op by hand:** the phone over the LAN has only been tried through `tools/coop.mjs`'s phone
+  profile, not on a real phone.
+- **Jetpack-only tops:** `npm run reach` lists them and checks a gun can see each one (all can, as
+  of plan 2). A new tall thing on the desk should be checked the same way.

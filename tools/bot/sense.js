@@ -92,7 +92,7 @@
         onGround: P.body.onGround, ladder: !!P.ladder, sliding: P.sliding, crouching: P.crouching, speed: P.speed,
         lookScale: P.lookScale, gain: (13.7 * Math.PI / 180 / 100) * (G.ctx.input.sens / 100),
         invert: G.ctx.input.invert,
-        grapple: { attached: P.grapple.attached, stam: P.grapple.stam, target: P.grapple.targetValid },
+        jet: { burning: P.jet.burning, fuel: P.jet.fuel },
         fov: cam.fov,
       },
       slot: G.heldSlot,

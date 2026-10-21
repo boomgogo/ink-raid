@@ -13,7 +13,7 @@
 const BTNS = [
   { id: 'jump', label: 'UP', x: -88, y: -190, r: 40 },
   { id: 'crouch', label: 'DUCK', x: -160, y: -112, r: 36 },
-  { id: 'grapple', label: 'LINE', x: -30, y: -112, r: 36 },
+  { id: 'jet', label: 'JET', x: -30, y: -112, r: 36 },
   { id: 'reload', label: 'LOAD', x: -160, y: -258, r: 32 },
   { id: 'grenade', label: 'BLAST', x: -30, y: -258, r: 32 },
 ];

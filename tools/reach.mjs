@@ -1,8 +1,9 @@
 // Can you get there on foot?
 //
 // Random inaccessible platforms (no stairs leading up to them) shouldn't
-// exist. On THE DESK every raised place was grapple-only, and nothing said so, because
-// nothing asked. This asks, in node, against the real `buildDesk()` and the
+// exist. On THE DESK every raised place was once reachable only by the grapple
+// (the jetpack has replaced it), and nothing said so, because nothing asked.
+// This asks, in node, against the real `buildDesk()` and the
 // physics' own column test:
 //
 //   1. A WALK GRAPH. Every 0.5 m, every top a standing body fits on, asked
@@ -16,6 +17,8 @@
 //   3. PLACES are declared, not inferred: `place: '...'` on a roof or a deck,
 //      every sniper nest and every pickup spot. The top of a cover block is
 //      not a place.
+//   3b. BLIND SPOTS: tops only the jetpack gets you on to, that no gun can see.
+//      Reported, not gated.
 //   4. IT WALKS THE RESULT. Every staircase up and down and every ladder up and
 //      down is replayed through the real Player, and a cutter is sent up every
 //      ladder, so "reachable" means walked, not graph-connected.
@@ -28,9 +31,9 @@
 import * as THREE from 'three';
 import { buildDesk } from '../src/world/map_desk.js';
 import { Builder } from '../src/world/build.js';
-import { bodyColliders, touchesColumn, floorAt, clearAbove } from '../src/core/physics.js';
+import { bodyColliders, touchesColumn, floorAt, clearAbove, raycast } from '../src/core/physics.js';
 import { Player, MOVE } from '../src/entities/player.js';
-import { Enemies } from '../src/entities/enemies/manager.js';
+import { Enemies, AWARE } from '../src/entities/enemies/manager.js';
 import { ghostsInWalkableSpace } from './lib/ghosts.mjs';
 import { PNG } from 'pngjs';
 import { writeFileSync } from 'node:fs';
@@ -307,15 +310,68 @@ console.log(`\n  a jump and mantle gets you on to ${JUMP.toFixed(2)} m, a double
 console.log(`  ${places.length} places, from the player start at (${level.startPoint.x.toFixed(0)}, ${level.startPoint.z.toFixed(0)})\n`);
 console.log('    place                                  height   reached');
 for (const p of places) {
-  const how = p.tier === Infinity ? 'NOT without the grapple' : TIERS[p.tier].name;
+  const how = p.tier === Infinity ? 'NOT without the jetpack' : TIERS[p.tier].name;
   console.log(`    ${p.name.padEnd(38)} ${p.y.toFixed(1).padStart(6)}   ${how}`);
 }
 const unreached = places.filter((p) => p.tier !== 0);
 check('every place reachable on foot', unreached.length === 0,
-  unreached.length ? unreached.map((p) => p.name).join('; ') : `${places.length} of ${places.length}, no jumping and no grapple`);
+  unreached.length ? unreached.map((p) => p.name).join('; ') : `${places.length} of ${places.length}, no jumping and no jetpack`);
 let walkable = 0, reached = 0;
 for (let j = 0; j < N * N; j++) for (const t of tops[j]) { walkable++; if (t.tier === 0) reached++; }
 console.log(`         ${reached} of ${walkable} standable tops reached on foot (${((reached / walkable) * 100).toFixed(0)}%)`);
+
+// --- 3b. blind spots -------------------------------------------------------------
+// The jetpack gets you on to the top of anything under the open sky, and the
+// walk graph reaches none of those tops: no figure can walk to you there. One a
+// gun can see is a vantage point. One nothing can see is somewhere to wait out
+// a wave, and the straggler search and TRAPPED both assume you can be found.
+// Every such top, every half metre, is looked at from every top a figure walks
+// to (every metre, its eye 1.53 m up, within the sight it has of you standing)
+// and from every sniper nest (within a nest's sight); a top seen from none of
+// them is blind. Reported, not gated: what to do about one is a design call.
+{
+  const t0b = performance.now();
+  const eyeUp = 1.7 * 0.9, centre = H * 0.55;
+  const vantage = [];
+  for (let i = 0; i < N; i += 4) for (let k = 0; k < N; k += 4) {
+    for (const t of tops[i * N + k]) if (t.tier === 0) vantage.push({ p: new THREE.Vector3(X(i), t.y + eyeUp, X(k)), r: AWARE.sight.still });
+  }
+  for (const n of level.snipers) vantage.push({ p: new THREE.Vector3(n.x, n.y + 1.5, n.z), r: AWARE.sniperSight });
+  const _d = new THREE.Vector3();
+  const seen = (q) => {
+    for (const v of vantage) {
+      _d.copy(q).sub(v.p);
+      const d = _d.length();
+      if (d > v.r) continue;
+      if (!raycast(level, v.p, _d.multiplyScalar(1 / d), d - 0.05)) return true;
+    }
+    return false;
+  };
+  let looked = 0;
+  const blind = new Map();          // collider -> { c, n }
+  for (let i = 0; i < N; i += 2) for (let k = 0; k < N; k += 2) {
+    const j = i * N + k;
+    for (const t of tops[j]) {
+      // only the jetpack gets you there, and you can come down on to it from the sky
+      if (t.tier !== Infinity || !clearBetween(j, t.y, t.y + 20)) continue;
+      looked++;
+      if (seen(new THREE.Vector3(X(i), t.y + centre, X(k)))) continue;
+      const c = t.sup[0];
+      const b = blind.get(c) || { c, n: 0 };
+      b.n++;
+      blind.set(c, b);
+    }
+  }
+  const list = [...blind.values()].sort((a, b) => b.n - a.n);
+  const area = list.reduce((a, b) => a + b.n * 0.25, 0);
+  console.log(`\n  ${looked} tops only the jetpack reaches, every 0.5 m; ${vantage.length} places a gun could see them from (${((performance.now() - t0b) / 1000).toFixed(1)} s)`);
+  console.log(list.length ? `  blind from everywhere, about ${area.toFixed(1)} m² on ${list.length} tops:` : '  every one of them is seen from somewhere a gun can stand');
+  for (const { c, n } of list.slice(0, 20)) {
+    const cx = (c.min.x + c.max.x) / 2, cz = (c.min.z + c.max.z) / 2;
+    console.log(`    ${String(c.tag || c.shape || '?').padEnd(14)} at (${cx.toFixed(1)}, ${cz.toFixed(1)}), ${c.max.y.toFixed(1)} m up: ${(n * 0.25).toFixed(2)} m²`);
+  }
+  if (list.length > 20) console.log(`    ... and ${list.length - 20} more`);
+}
 
 // every ladder is wired into the graph at both ends
 for (const { l, foot, top } of ladderEnds) {

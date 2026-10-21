@@ -8,6 +8,9 @@ import { chromium } from 'playwright';
 import * as THREE from 'three';
 import { Builder } from '../src/world/build.js';
 import { Player, MOVE } from '../src/entities/player.js';
+import { JET } from '../src/entities/jetpack.js';
+import { buildDesk } from '../src/world/map_desk.js';
+import { floorAt } from '../src/core/physics.js';
 
 const URL_BASE = process.env.OURS_URL || 'http://localhost:4173/';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -89,6 +92,96 @@ function nodePlayer(build, at, yaw) {
   // the ledge is at z = -10, and the body is 0.35 m either side of its middle
   check('crouch stops at a ledge', low.y > 1.99 && low.z < -9.6 && low.z > -10.36 && high.y < 1,
     `crouched: on it at z ${low.z.toFixed(2)} (edge -10); standing: walked off to y ${high.y.toFixed(2)}`);
+}
+
+// The jetpack, against JET: lift-off, the climb it holds, a tank's length,
+// the wait before it refuels (in the air too), the floor under which it will
+// not light, and how high one tank goes against the real desk.
+{
+  const desk = buildDesk(new THREE.Scene());
+  const highest = desk.places.reduce((a, pl) => (pl.collider.max.y > a.y ? { name: pl.name, y: pl.collider.max.y } : a), { y: -Infinity });
+  const tallest = desk.colliders.reduce((a, c) => Math.max(a, c.max.y), -Infinity);
+
+  // straight up from standing, holding it until it cuts out
+  const climb = (jumpFirst) => {
+    const { p, held, taps, step } = nodePlayer(() => {}, new THREE.Vector3(0, 0.05, 0), 0);
+    for (let i = 0; i < 30; i++) step();
+    const y0 = p.body.pos.y;
+    if (jumpFirst) { taps.add('jump'); step(); }
+    held.add('jet');
+    const out = { p, held, step, y0, apex: y0, vmax: 0, liftT: null, cutT: null, fuelAtCut: null };
+    for (let i = 1; i <= 240; i++) {
+      step();
+      const t = i / 60;
+      if (out.liftT === null && p.body.pos.y - y0 >= 0.25) out.liftT = t;
+      out.vmax = Math.max(out.vmax, p.body.vel.y);
+      out.apex = Math.max(out.apex, p.body.pos.y);
+      if (out.cutT === null && !p.jet.burning) { out.cutT = t; out.fuelAtCut = p.jet.fuel; }
+    }
+    return out;
+  };
+  const up = climb(false);
+  const tankT = JET.tank / JET.burn;
+  check('jetpack lifts off', up.liftT !== null && up.liftT <= 0.25, `0.25 m up after ${up.liftT?.toFixed(2)} s (want <= 0.25)`);
+  check('jetpack holds its climb', up.vmax <= JET.climbMax + 0.05, `fastest climb ${up.vmax.toFixed(2)} m/s (holds ${JET.climbMax})`);
+  check('a tank runs out', up.cutT !== null && Math.abs(up.cutT - tankT) < 0.05 && up.fuelAtCut === 0,
+    `cut out after ${up.cutT?.toFixed(2)} s of burn (a tank is ${tankT.toFixed(2)} s), fuel ${up.fuelAtCut}`);
+  check('one tank tops the highest place', up.apex - up.y0 >= highest.y + 0.5,
+    `${(up.apex - up.y0).toFixed(1)} m from standing, over ${highest.name} at ${highest.y.toFixed(1)} m`);
+  const hop = climb(true);
+  check('...and not out over the map', hop.apex - hop.y0 < tallest - 2,
+    `${(hop.apex - hop.y0).toFixed(1)} m with a jump first; the tallest thing is ${tallest.toFixed(1)} m`);
+
+  // after it cuts out: nothing for `refillWait`, then it refuels, in the air
+  {
+    const { p, held, step } = nodePlayer(() => {}, new THREE.Vector3(0, 0.05, 0), 0);
+    held.add('jet');
+    while (p.jet.burning || p.jet.fuel === JET.tank) step();
+    held.delete('jet');
+    for (let i = 0; i < Math.floor((JET.refillWait - 0.05) * 60); i++) step();
+    const waiting = p.jet.fuel;
+    for (let i = 0; i < 12; i++) step();
+    const after = p.jet.fuel;
+    check('refuels after the wait, not before', waiting === 0 && after > 0 && !p.body.onGround,
+      `fuel ${waiting} at ${(JET.refillWait - 0.05).toFixed(2)} s, ${after.toFixed(3)} at ${(JET.refillWait + 0.15).toFixed(2)} s, in the air ${!p.body.onGround}`);
+    // under `minIgnite` it will not light; at it, it does
+    p.jet.fuel = JET.minIgnite - 0.01;
+    held.add('jet');
+    step();
+    const dead = p.jet.burning;
+    held.delete('jet');
+    step();
+    p.jet.fuel = JET.minIgnite;
+    p.jet.wait = 0;
+    held.add('jet');
+    step();
+    check('will not light on fumes', !dead && p.jet.burning, `under ${JET.minIgnite}: ${dead ? 'lit' : 'dead'}; at it: ${p.jet.burning ? 'lit' : 'dead'}`);
+  }
+
+  // Onto the north stack's roof, from the floor in front of it: hold it, and go
+  // forward once over the ledge's cover. The routes differ in what they meet on
+  // the way; one tank is enough for at least one of them, and that is the gate.
+  {
+    const roof = desk.places.find((pl) => pl.name === 'north stack, roof').collider;
+    const routes = [];
+    for (const [x, z] of [[-6, -14], [2, -14], [10, -17], [2, -17]]) {
+      desk.startPoint = new THREE.Vector3(x, floorAt(desk, x, z, 3) + 0.05, z);
+      const p = new Player({ level: desk, camera: new THREE.PerspectiveCamera(), scene: new THREE.Scene() });
+      const held = new Set();
+      const input = { look: () => ({ yaw: 0, pitch: 0 }), down: (k) => held.has(k), pressed: () => false };
+      for (let i = 0; i < 20; i++) p.update(1 / 60, input);
+      held.add('jet');
+      let on = false;
+      for (let i = 0; i < 360 && !on; i++) {
+        if (p.body.pos.y > 12) held.add('forward');
+        p.update(1 / 60, input);
+        const b = p.body.pos;
+        on = p.body.onGround && b.y > roof.max.y - 0.05 && b.x > roof.min.x && b.x < roof.max.x && b.z > roof.min.z && b.z < roof.max.z;
+      }
+      routes.push(`(${x}, ${z}) ${on ? `on it, ${p.jet.fuel.toFixed(2)} left` : 'short'}`);
+    }
+    check('one tank onto the north stack', routes.some((r) => r.includes('on it')), routes.join('; '));
+  }
 }
 
 const browser = await chromium.launch({ channel: 'chrome', headless: false, args: ['--hide-scrollbars', '--mute-audio'] });
@@ -208,30 +301,22 @@ const dropped = await probe();
 check('survives a long drop', dropped.onGround && dropped.pos[1] > -5,
   `y=${dropped.pos[1]}, onGround=${dropped.onGround}`);
 
-// --- grapple ---------------------------------------------------------------
+// --- jetpack ---------------------------------------------------------------
+// In the browser, at real frame times: held, it lifts you and burns fuel; let
+// go, it refuels.
 {
-  // the calibration wall: a known box, straight ahead, well inside grapple range
-  await page.evaluate(() => {
-    window.__ink.teleport(-24, 2, -12);
-    window.__ink.face(Math.PI * 0, 0.25);      // yaw 0 looks along -z
-  });
-  await sleep(700);
-  const aim = await probe();
-  await page.evaluate(() => window.__ink.tap('grapple'));
-  await sleep(120);
-  const hooked = await probe();
-  check('grapple attaches', hooked.grapple.attached, `target=${aim.grapple.target}, attached=${hooked.grapple.attached}`);
-  if (hooked.grapple.attached) {
-    await sleep(700);
-    const pulled = await probe();
-    check('grapple pulls', pulled.speed > 3 || pulled.vel[1] > 2, `speed ${pulled.speed}, vy ${pulled.vel[1]}`);
-    check('grapple drains stamina', pulled.grapple.stam < hooked.grapple.stam,
-      `${hooked.grapple.stam} -> ${pulled.grapple.stam}`);
-    await page.evaluate(() => window.__ink.tap('grapple'));
-    await sleep(1500);
-    const regen = await probe();
-    check('stamina regenerates', regen.grapple.stam > pulled.grapple.stam, `${pulled.grapple.stam} -> ${regen.grapple.stam}`);
-  }
+  await reset();
+  const before = await probe();
+  await hold(['jet']);
+  await sleep(500);
+  const up = await probe();
+  await release(['jet']);
+  check('jetpack lifts you', up.jet.burning && up.vel[1] > 3 && up.pos[1] > before.pos[1] + 0.5 && up.jet.fuel < before.jet.fuel,
+    `burning=${up.jet.burning}, vy=${up.vel[1]}, up ${(up.pos[1] - before.pos[1]).toFixed(2)} m, fuel ${before.jet.fuel} -> ${up.jet.fuel}`);
+  await sleep(1500);
+  const back = await probe();
+  check('fuel comes back', !back.jet.burning && back.jet.fuel > up.jet.fuel, `${up.jet.fuel} -> ${back.jet.fuel}`);
+  await sleep(2500);
 }
 
 // --- mantle ----------------------------------------------------------------
@@ -293,24 +378,6 @@ check('survives a long drop', dropped.onGround && dropped.pos[1] > -5,
   check('coyote time', leftGround >= 0 && postJump.vel[1] > preJump.vel[1] + 3,
     `left ground, then vy ${preJump.vel[1]} -> ${postJump.vel[1]}`);
   await sleep(900);
-}
-
-// --- grapple straight up ---------------------------------------------------
-// The case that was broken: hooking something overhead while standing still.
-// If the tug does not beat gravity, this does nothing at all.
-{
-  await page.evaluate(() => {
-    window.__ink.teleport(0, 1.2, -6);          // under the calibration overhang
-    window.__ink.face(0, 1.35);                 // almost straight up
-  });
-  await sleep(700);
-  await page.evaluate(() => window.__ink.tap('grapple'));
-  await sleep(500);
-  const up = await probe();
-  check('grapple lifts you', up.grapple.attached && up.vel[1] > 3 && up.pos[1] > 0.5,
-    `attached=${up.grapple.attached}, vy=${up.vel[1]}, y=${up.pos[1]}`);
-  await page.evaluate(() => window.__ink.tap('grapple'));
-  await sleep(400);
 }
 
 // --- nothing exploded ------------------------------------------------------

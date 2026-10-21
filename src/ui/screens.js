@@ -11,6 +11,12 @@ function el(html) {
 }
 
 const esc = (s) => String(s).replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+// Where the game comes from, so it can be taken and made into something else, and where there
+// are more: at the foot of the title and pause screens. The boot splash (index.html) has the same.
+const LINKS = `<p class="ir-links">
+  <a href="https://github.com/boomgogo/ink-raid" target="_blank" rel="noopener">fork me on GitHub</a>
+  &middot; <a href="https://maize.live" target="_blank" rel="noopener">more games on Maize.Live</a>
+</p>`;
 // look speed as a multiplier of the default: 100 reads 1.00×
 const lookSpeed = (v) => `${(v / 100).toFixed(2)}×`;
 
@@ -41,11 +47,32 @@ export class Screens {
     this._onBackdrop = onBackdrop;
     this.node.classList.add('ir-on');
     this.node.innerHTML = `<div class="ir-panel">${panelHtml}</div>`;
-    // stop every control from bubbling its click up to the backdrop handler
-    this.node.querySelectorAll('button, input, label, details, summary').forEach((n) => {
+    // stop every control from bubbling its click up to the backdrop handler: a link too, or
+    // following one from the pause screen would also resume the run and take the pointer
+    this.node.querySelectorAll('button, input, label, details, summary, a').forEach((n) => {
       n.addEventListener('click', (e) => e.stopPropagation());
     });
     return this.node.querySelector('.ir-panel');
+  }
+
+  /**
+   * FRIENDS: the 👥 panel, where a room is opened and friends are invited (net/room.js). Not
+   * there at all in a page without one.
+   * @param {{label:string, inRoom:boolean, onClick:Function} | null | undefined} f
+   */
+  _friends(panel, f) {
+    if (!f) return;
+    const b = el(`<button class="ir-leave ir-friends" data-a="friends">${quillButton('friends')}<span>${esc(f.label)}</span></button>`);
+    b.addEventListener('click', (e) => { e.stopPropagation(); f.onClick(); });
+    const go = panel.querySelector('.ir-go');
+    panel.insertBefore(b, go);
+    // Where a room comes from, for whoever opens one: until this page is in a room, player 1
+    // needs to know there is somewhere to get one, or a server of their own.
+    if (f.inRoom) return;
+    const a = el(`<p class="ir-p3p2">to play with friends, get a room (or a server of your own) at
+      <a href="https://p3p2.me" target="_blank" rel="noopener">p3p2.me</a></p>`);
+    a.addEventListener('click', (e) => e.stopPropagation());
+    panel.insertBefore(a, go);
   }
 
   /**
@@ -58,6 +85,7 @@ export class Screens {
    * @param {number} o.volume      0-100
    * @param {boolean} o.howtoOpen
    * @param {boolean} o.touch      true on a touch-primary device
+   * @param {{label:string, onClick:Function}} [o.friends]
    * @param {(key:string)=>void} o.onStart
    * @param {(key:'volume'|'music'|'sens'|'invert', value:any)=>void} o.onSetting
    * @param {(open:boolean)=>void} o.onHowto
@@ -79,7 +107,7 @@ export class Screens {
       <p><b>right side</b> — drag to look; a quick tap there fires one shot.</p>
       <p><b>INK</b> holds the trigger and keeps aiming while you drag on it.</p>
       <p><b>UP</b> jump (again in the air) &middot; <b>DUCK</b> crouch, or slide while moving fast</p>
-      <p><b>LINE</b> grapple: tap to fire, hold to reel, jump to launch</p>
+      <p><b>JET</b> hold to fly; it refuels while you are not flying</p>
       <p><b>LOAD</b> reload &middot; <b>BLAST</b> grenade &middot; <b>NEXT</b> swap weapon</p>
       <p><b>WRAP</b> appears once you are carrying a bandage</p>
       <p>shoot down a paper plane for a bandage, or a staple gun</p>
@@ -87,7 +115,7 @@ export class Screens {
       <p><b>WASD</b> move, mouse to look &middot; <b>Shift</b> sprint &middot; <b>Space</b> jump, again in the air</p>
       <p><b>C</b> crouch — quieter, and you won't walk off an edge; hold it while sprinting to slide, in the air to dash</p>
       <p><b>Space</b> into a wall is a wall jump &middot; walk into a ladder to climb it, <b>C</b> to slide back down</p>
-      <p><b>Q</b> grapple — tap to fire, hold to reel in, jump to launch off it</p>
+      <p><b>Q</b> hold to fly the jetpack — the gauge under the crosshair is its fuel, and it refuels while you are not flying</p>
       <p>left click fires, right click aims &middot; <b>1-4</b> rifle, shotgun, sniper, katana</p>
       <p>shoot down a paper plane: a bandage, or a staple gun on <b>5</b></p>
       <p><b>R</b> reload &middot; <b>G</b> throws a grenade, held a moment longer for more distance</p>
@@ -119,11 +147,13 @@ export class Screens {
         <label><input type="checkbox" id="irInvert" ${o.invert ? 'checked' : ''}> invert vertical look</label>
       </div>
       <p class="ir-go">choose one and start drawing</p>
+      ${LINKS}
     `, o.onBackdrop);
 
     panel.querySelectorAll('[data-difficulty]').forEach((b) => {
       b.addEventListener('click', () => o.onStart(b.dataset.difficulty));
     });
+    this._friends(panel, o.friends);
     panel.querySelector('#irSettings').addEventListener('click', (e) => e.stopPropagation());
     const howto = panel.querySelector('#irHowto');
     howto.addEventListener('click', (e) => e.stopPropagation());
@@ -142,31 +172,44 @@ export class Screens {
     panel.querySelector('#irInvert').addEventListener('change', (e) => o.onSetting('invert', e.target.checked));
   }
 
-  /** @param {{diffLabel:string, score:number, wave:number, onMainMenu:Function, onBackdrop:Function}} o */
+  /**
+   * @param {{diffLabel:string, score:number, wave:number, shared?:boolean, friends?:object,
+   *          onMainMenu:Function, onBackdrop:Function}} o
+   */
   pause(o) {
     const panel = this._show(`
       <h1 class="ir-title">PAUSED</h1>
       <p class="ir-stats">${esc(o.diffLabel)} &middot; score <b>${o.score}</b> &middot; wave <b>${o.wave}</b></p>
+      ${o.shared ? '<p class="ir-best">the desk does not stop for you: your friends are still on it</p>' : ''}
       <button class="ir-leave" id="btnMenu">${quillButton('pause-menu')}<span>MAIN MENU</span></button>
       <p class="ir-go">click anywhere to keep going</p>
+      ${LINKS}
     `, o.onBackdrop);
     panel.querySelector('#btnMenu').addEventListener('click', () => o.onMainMenu());
+    this._friends(panel, o.friends);
   }
 
   /**
-   * @param {{diffLabel:string, waves:number, kills:number, score:number, best:number,
+   * `crew`: with friends, everybody who was in the run, [name, kills] each, and `best` is null:
+   * a run together is not a score of your own.
+   * @param {{diffLabel:string, waves:number, kills:number, score:number, best:number|null,
+   *          crew?:[string, number][], friends?:object,
    *          touch:boolean, onMainMenu:Function, onBackdrop:Function}} o
    */
   death(o) {
     const plural = o.waves === 1 ? '' : 's';
     const again = o.touch ? 'tap to start a fresh page' : 'click, or press Space, to start a fresh page';
+    const crew = o.crew
+      ? `<p class="ir-best ir-crew">${o.crew.map(([name, kills]) => `${esc(name)} <b>${kills}</b>`).join(' &middot; ')}</p>`
+      : '';
     const panel = this._show(`
       <h1 class="ir-title">DRAWN OVER</h1>
-      <p class="ir-stats">you survived <b>${o.waves}</b> wave${plural} &middot; <b>${o.kills}</b> kills &middot; score <b>${o.score}</b></p>
-      <p class="ir-best">${esc(o.diffLabel)} &middot; best ${o.best}</p>
+      <p class="ir-stats">${o.crew ? 'together you' : 'you'} survived <b>${o.waves}</b> wave${plural} &middot; <b>${o.kills}</b> kills &middot; score <b>${o.score}</b></p>
+      ${o.best === null ? crew : `<p class="ir-best">${esc(o.diffLabel)} &middot; best ${o.best}</p>`}
       <button class="ir-leave" id="btnMenu">${quillButton('death-menu')}<span>MAIN MENU</span></button>
       <p class="ir-go">${again}</p>
     `, o.onBackdrop);
     panel.querySelector('#btnMenu').addEventListener('click', () => o.onMainMenu());
+    this._friends(panel, o.friends);
   }
 }

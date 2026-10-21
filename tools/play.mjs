@@ -2,7 +2,7 @@
 //
 // The numbers in tools/feel.mjs say the movement is correct. They cannot say
 // whether it looks good — whether the bob is too much, the roll too little, the
-// landing dip readable, the grapple satisfying. That needs watching.
+// landing dip readable, the jetpack satisfying. That needs watching.
 import { chromium } from 'playwright';
 
 // `npm run play -- --bot`: the bot plays a whole run instead (tools/autoplay.mjs,
@@ -77,29 +77,32 @@ await beat('strafe past a wall', async () => {
   await release(['right']);
 });
 await beat('air dash', async () => { await tap('jump'); await sleep(150); await tap('crouch'); await sleep(900); });
-await beat('grapple', async () => {
-  const a = await page.evaluate(() => {
+await beat('jetpack', async () => {
+  // up on to the nearest roof: face it, burn until over its edge, then in
+  const roof = await page.evaluate(() => {
     const p = window.__ink.player.body.pos;
-    const anchors = window.__ink.level.anchors;
     let best = null, bd = 1e9;
-    for (const q of anchors) {
-      const d = Math.hypot(q.x - p.x, q.z - p.z);
-      if (d < bd) { bd = d; best = q; }
+    for (const { collider: c } of window.__ink.level.places) {
+      if (c.max.y < 8) continue;
+      const x = (c.min.x + c.max.x) / 2, z = (c.min.z + c.max.z) / 2;
+      const d = Math.hypot(x - p.x, z - p.z);
+      if (d < bd) { bd = d; best = { x, y: c.max.y, z }; }
     }
     return best;
   });
-  if (a) {
+  if (roof) {
     const p = await page.evaluate(() => window.__ink.player.body.pos);
-    const yaw = Math.atan2(-(a.x - p.x), -(a.z - p.z));
-    const pitch = Math.atan2(a.y - (p.y + 1.6), Math.hypot(a.x - p.x, a.z - p.z));
-    await face(yaw, Math.min(1.4, pitch));
-    await sleep(300);
-    await tap('grapple');
-    await sleep(1400);
-    await tap('jump');
-    await sleep(600);
-    await face(yaw, -0.05);          // level out, or the rest of the run films sky
-    await sleep(700);
+    await face(Math.atan2(-(roof.x - p.x), -(roof.z - p.z)), 0.15);
+    await hold(['jet']);
+    for (let i = 0; i < 50; i++) {
+      if (await page.evaluate((y) => window.__ink.player.body.pos.y > y + 0.5, roof.y)) break;
+      await sleep(50);
+    }
+    await hold(['forward']);
+    await sleep(900);
+    await release(['jet', 'forward']);
+    await face(0, -0.05);            // level out, or the rest of the run films sky
+    await sleep(1200);
   }
 });
 await beat('run back', async () => { await hold(['forward', 'sprint']); await sleep(1500); await release(['forward', 'sprint']); });

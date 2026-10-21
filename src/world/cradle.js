@@ -82,7 +82,6 @@ export function layCradle(b, x, z, facing) {
     const c = at(0, w * C.spread, C.bar);
     b.cyl(c.x, c.y, c.z, 0.2, 10.2, { ...rod, dir: t });
   }
-  for (const u of [-4.9, 4.9]) b.anchor(...at(u, 0, C.bar + 0.5).toArray());
   return { origin: new THREE.Vector3(x, 0, z), t, n, facing, pitch };
 }
 

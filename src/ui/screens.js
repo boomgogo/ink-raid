@@ -106,10 +106,10 @@ export class Screens {
       <p><b>left thumb</b> — the floating stick that appears where you press: push it far to sprint.</p>
       <p><b>right side</b> — drag to look; a quick tap there fires one shot.</p>
       <p><b>INK</b> holds the trigger and keeps aiming while you drag on it.</p>
+      <p>the <b>INK</b> at the top left holds the trigger too, so you can fire with your left thumb while your right one aims.</p>
       <p><b>UP</b> jump (again in the air) &middot; <b>DUCK</b> crouch, or slide while moving fast</p>
-      <p><b>JET</b> hold to fly; it refuels while you are not flying</p>
-      <p><b>LOAD</b> reload &middot; <b>BLAST</b> grenade &middot; <b>NEXT</b> swap weapon</p>
-      <p><b>WRAP</b> appears once you are carrying a bandage</p>
+      <p><b>JET</b> hold to fly; it refuels while you are not flying &middot; <b>BLAST</b> grenade</p>
+      <p>along the top: <b>LOAD</b> reload &middot; <b>NEXT</b> swap weapon &middot; <b>WRAP</b> once you carry a bandage</p>
       <p>shoot down a paper plane for a bandage, or a staple gun</p>
     ` : `
       <p><b>WASD</b> move, mouse to look &middot; <b>Shift</b> sprint &middot; <b>Space</b> jump, again in the air</p>

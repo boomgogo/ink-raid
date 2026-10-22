@@ -6,6 +6,7 @@ import { buildSky } from './world/sky.js';
 import { Input } from './core/input.js';
 import { Player } from './entities/player.js';
 import { TYPES } from './entities/enemies/types.js';
+import { pose as poseFigure } from './entities/enemies/rig.js';
 import { Game } from './game.js';
 import { raycast } from './core/physics.js';
 import { difficulty, setDifficulty } from './core/difficulty.js';
@@ -232,6 +233,8 @@ window.__ink = {
   // the roster, so tools/collide.mjs can audit one figure of every type without
   // keeping its own copy of the list
   enemyTypes: Object.keys(TYPES),
+  // a figure's joints, posed as the game poses them, for pictures of one pose
+  poseFigure,
   // the live dials, and a way to flip them without a run, for tools/game.mjs
   difficulty,
   setDifficulty,

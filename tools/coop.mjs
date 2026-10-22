@@ -257,12 +257,15 @@ await sleep(1500);
     }
     return null;
   });
-  // the host far off, the guest in front of where the gun will be
-  await run(A, () => {
+  // The host far off, the guest in front of where the gun will be. Far from the
+  // gun, not from the middle of the desk: the point furthest from the middle was
+  // once the gun's own, and the figure stood in the host and shot at its feet.
+  await run(A, (gun) => {
     const lv = window.__ink.game.ctx.level;
-    const far = lv.spawnPool.reduce((a, s) => (Math.hypot(s.x, s.z) > Math.hypot(a.x, a.z) ? s : a));
+    const away = (s) => Math.hypot(s.x - gun[0], s.z - gun[2]);
+    const far = lv.spawnPool.reduce((a, s) => (away(s) > away(a) ? s : a));
     window.__ink.teleport(far.x, far.y + 0.1, far.z);
-  });
+  }, spot.gun);
   await run(B, (at) => window.__ink.teleport(at[0], at[1], at[2]), spot.at);
   // every round the host's page sends is flown here too: count them as they come
   await run(B, () => {
@@ -289,21 +292,23 @@ await sleep(1500);
 
 // --- on the desk -------------------------------------------------------------------
 // A bandage the host drops is on both pages, and goes to whoever walks over it.
+// That one bandage: a paper plane shot down meanwhile drops one of its own.
 {
   const at = await run(B, () => window.__ink.player.body.pos.toArray());
-  await run(A, (p) => {
+  const others = await run(A, (p) => {
     const G = window.__ink.game;
-    G.ctx.pickups.drop('bandage', new (window.__ink.player.body.pos.constructor)(p[0] + 3, p[1] + 0.5, p[2]));
+    window.__dropped = G.ctx.pickups.drop('bandage', new (window.__ink.player.body.pos.constructor)(p[0] + 3, p[1] + 0.5, p[2]));
+    return G.ctx.pickups.list.filter((q) => q.item === 'bandage' && q !== window.__dropped).length;
   }, at);
   const there = await until(B, () => window.__ink.game.ctx.pickups.list.some((q) => q.item === 'bandage' && q.life !== Infinity));
   const before = await run(B, () => window.__ink.game.bandages);
   await run(B, () => { window.__ink.game.bandages = 0; });
   await run(B, (p) => window.__ink.teleport(p[0] + 3, p[1] + 0.2, p[2]), at);
   const took = await until(B, () => window.__ink.game.bandages === 1);
-  const goneHost = await until(A, () => !window.__ink.game.ctx.pickups.list.some((q) => q.item === 'bandage' && q.life !== Infinity));
+  const goneHost = await until(A, () => !window.__ink.game.ctx.pickups.list.includes(window.__dropped));
   await run(B, (n) => { window.__ink.game.bandages = n; }, before);
   check('on the desk: one bandage, for whoever gets there', there && took && goneHost,
-    `on the guest's page ${there}, taken by the guest ${took}, gone from the host's ${goneHost}`);
+    `on the guest's page ${there}, taken by the guest ${took}, gone from the host's ${goneHost} (${others} other bandages there)`);
 }
 
 // --- a friend's jetpack ------------------------------------------------------------
@@ -319,6 +324,186 @@ await sleep(1500);
   const out = await until(A, (b) => window.__ink.net.crew.mates.get(b)?.said?.j === 0, bId, 4000);
   check('a friend\'s jetpack is seen burning', lit && puffs > 0 && out, `lit on the host's page ${lit}, ${puffs} puffs round the figure, out again ${out}`);
 }
+
+// --- a friend's landing ------------------------------------------------------------
+// Up on a whole tank, down again and stood still: the last report says where they
+// landed, and nothing comes after it. The figure must stop there, not carry on
+// down through the floor the way it was falling.
+{
+  const spot = await run(B, () => {
+    const I = window.__ink, V = I.player.body.pos.constructor;
+    // open sky over it: nothing to land on but the floor it took off from
+    return I.game.ctx.level.spawnPool.map((s) => [s.x, s.y, s.z])
+      .find(([x, y, z]) => !I.raycastLevel(new V(x, y + 0.5, z), new V(0, 1, 0), 30));
+  });
+  await run(B, (s) => { window.__ink.teleport(s[0], s[1] + 0.1, s[2]); }, spot);
+  await until(B, () => window.__ink.probe().onGround, null, 3000);
+  await sleep(600);
+  await run(A, (b) => {
+    const m = window.__ink.net.crew.mates.get(b);
+    window.__drawn = [];
+    const tick = () => {
+      if (!window.__drawn) return;
+      if (m.fig.root.visible) window.__drawn.push(m.fig.root.position.y);
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }, bId);
+  await run(B, () => { window.__ink.input.state.jet = true; });
+  await until(B, () => window.__ink.probe().jet.fuel < 0.02, null, 5000);
+  await run(B, () => { window.__ink.input.state.jet = false; });
+  const top = await run(B, () => window.__ink.probe().pos[1]);
+  await until(B, () => window.__ink.probe().onGround, null, 5000);
+  const landed = await run(B, () => window.__ink.player.body.pos.y);
+  await sleep(1600);
+  const drawn = await run(A, () => { const d = window.__drawn; window.__drawn = null; return d; });
+  const low = Math.min(...drawn);
+  check('a friend\'s landing: never under the floor', drawn.length > 30 && low >= landed - 0.05,
+    `up ${(top - landed).toFixed(1)} m; lowest drawn ${(low - landed).toFixed(2)} m from where they landed, over ${drawn.length} frames`);
+}
+
+// --- a friend's weapons ------------------------------------------------------------
+// What the guest holds and does, as the host's page draws it. Nothing on the desk
+// to shoot back, so whatever is drawn is the guest's.
+await run(A, () => {
+  const G = window.__ink.game;
+  G.ctx.enemies.clear();
+  G.waves.toSpawn = [];
+  G.waves.state = 'clearing';
+});
+const held = (i) => run(B, (n) => {
+  const G = window.__ink.game;
+  if (n === 4) { G.stapler.hidden = false; G.stapler.mag = 20; }
+  G.selectWeapon(n);
+  return G.weapon.key;
+}, i);
+const drawnOf = (p) => run(p, () => ({ ...window.__ink.net.crew.drawn }));
+{
+  // the gun in their hands, and only that one
+  const seen = [];
+  for (let i = 0; i < 5; i++) {
+    const key = await held(i);
+    const t0 = Date.now();
+    const ok = await until(A, ([b, k]) => {
+      const m = window.__ink.net.crew.mates.get(b);
+      const on = Object.entries(m.fig.props).filter(([, g]) => g.visible).map(([k2]) => k2);
+      return m.held === k && on.length === 1;
+    }, [bId, key], 2000);
+    seen.push(`${key} ${ok ? `${Date.now() - t0} ms` : 'never'}`);
+  }
+  await held(0);
+  check('a friend\'s gun: the one in their hands', seen.every((s) => !s.endsWith('never')), seen.join(', '));
+}
+{
+  // held the right way: along where they look, out in front of them
+  const rows = [];
+  for (const pt of [0, 0.52, -0.52]) {
+    const yaw = 0.8;
+    await run(B, ([y, p]) => window.__ink.face(y, p), [yaw, pt]);
+    await sleep(500);
+    rows.push(await run(A, ([b, y, p]) => {
+      const m = window.__ink.net.crew.mates.get(b);
+      const J = m.fig.J;
+      m.fig.root.updateMatrixWorld(true);
+      const V = J.grip.position.constructor;
+      const dir = new V(0, 0, -1).transformDirection(J.grip.matrixWorld);
+      const grip = J.grip.getWorldPosition(new V());
+      const chest = J.chest.getWorldPosition(new V());
+      const look = new V(-Math.sin(y) * Math.cos(p), Math.sin(p), -Math.cos(y) * Math.cos(p));
+      return { pt: p, off: (dir.angleTo(look) * 180) / Math.PI, ahead: grip.sub(chest).dot(new V(-Math.sin(y), 0, -Math.cos(y))) };
+    }, [bId, yaw, pt]));
+  }
+  check('a friend\'s gun: held where they look', rows.every((r) => r.off < 10 && r.ahead > 0.25),
+    rows.map((r) => `pitch ${r.pt}: ${r.off.toFixed(1)} deg off, ${r.ahead.toFixed(2)} m ahead`).join('; '));
+}
+{
+  // one rifle round at the floor in front of the guest: the same tracer end, and a blot there
+  await run(A, () => {
+    const fx = window.__ink.game.effects;
+    window.__tracers = [];
+    window.__blots = [];
+    const tracer = fx.tracer.bind(fx), impact = fx.impact.bind(fx);
+    fx.tracer = (a, b, o) => { window.__tracers.push(b.toArray()); tracer(a, b, o); };
+    fx.impact = (p, n, ink, mv) => { window.__blots.push(p.toArray()); impact(p, n, ink, mv); };
+  });
+  await run(B, () => window.__ink.face(0.3, -0.7));
+  await sleep(300);
+  const there = await run(B, () => {
+    const G = window.__ink.game, fx = G.effects;
+    const impact = fx.impact;
+    let at = null;
+    fx.impact = (p, n, ink, mv) => { at = p.toArray(); impact.call(fx, p, n, ink, mv); };
+    G.weapon.fire();
+    fx.impact = impact;
+    return at;
+  });
+  const near = (list, p) => list.some((q) => Math.hypot(q[0] - p[0], q[1] - p[1], q[2] - p[2]) < 0.05);
+  const traced = await until(A, (p) => window.__tracers.some((q) => Math.hypot(q[0] - p[0], q[1] - p[1], q[2] - p[2]) < 0.05), there, 1500);
+  await sleep(200);
+  const blots = await run(A, () => window.__blots);
+  check('a friend\'s shot: tracer and blot where it hit', !!there && traced && near(blots, there),
+    there ? `on the guest at ${there.map((v) => v.toFixed(2)).join(', ')}: tracer there ${traced}, blot there ${near(blots, there)}` : 'the guest\'s round hit nothing');
+}
+{
+  // a shotgun: every pellet
+  await held(1);
+  const before = await drawnOf(A);
+  const n = await run(B, () => { const G = window.__ink.game; G.weapon.fire(); return G.weapon.stats.lethality.pellets; });
+  await until(A, (s) => window.__ink.net.crew.drawn.shots > s, before.shots, 1500);
+  const after = await drawnOf(A);
+  check('a friend\'s shot: a shotgun\'s every pellet', after.shots - before.shots === 1 && after.tracers - before.tracers === n,
+    `${after.shots - before.shots} shot, ${after.tracers - before.tracers} tracers for ${n} pellets`);
+}
+{
+  // a slash: the arm goes up over the head, and down through the cut
+  await held(3);
+  await run(A, (b) => {
+    const m = window.__ink.net.crew.mates.get(b);
+    window.__arm = [];
+    const tick = () => {
+      if (!window.__arm) return;
+      window.__arm.push(m.fig.J.armUR.rotation.x);
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }, bId);
+  const before = await drawnOf(A);
+  await run(B, () => window.__ink.game.weapon.beginSwing());
+  await sleep(1000);
+  const arm = await run(A, () => { const a = window.__arm; window.__arm = null; return a; });
+  const after = await drawnOf(A);
+  const top = Math.min(...arm);
+  check('a friend\'s slash: drawn as a cut', after.slashes - before.slashes === 1 && top < -2,
+    `${after.slashes - before.slashes} slash, the arm up to ${top.toFixed(2)} rad`);
+  await held(0);
+}
+{
+  // a grenade at the guest's feet, with the host stood beside it: drawn, gone off, and harmless
+  const at = await run(B, () => window.__ink.player.body.pos.toArray());
+  await run(A, (p) => window.__ink.teleport(p[0] + 2, p[1] + 0.1, p[2]), at);
+  await sleep(500);
+  const before = await run(A, () => ({ hp: window.__ink.player.hp, scorch: window.__ink.game.effects.decals.filter((d) => d?.size === 3.5).length }));
+  const throws = (await drawnOf(A)).throws;
+  await run(B, () => {
+    const g = window.__ink.game.grenades;
+    window.__ink.face(0, -1.3);
+    g.count = 3;
+    g.charge = 0;
+    g.throw();
+  });
+  const flew = await until(A, (n) => window.__ink.net.crew.drawn.throws > n && window.__ink.game.grenades.shown.length === 1, throws, 2000);
+  const off = await until(A, () => window.__ink.game.grenades.shown.length === 0, null, 5000);
+  await sleep(200);
+  const after = await run(A, () => ({ hp: window.__ink.player.hp, scorch: window.__ink.game.effects.decals.filter((d) => d?.size === 3.5).length }));
+  check('a friend\'s grenade: seen, gone off, harmless', flew && off && after.scorch > before.scorch && after.hp === before.hp,
+    `in the air on the host's page ${flew}, gone off ${off}, scorched ${after.scorch > before.scorch}, the host 2 m off lost ${before.hp - after.hp} hp`);
+  await hardy(B);
+}
+await run(A, () => {
+  const fx = window.__ink.game.effects;
+  delete fx.tracer;
+  delete fx.impact;
+});
 
 // --- stragglers --------------------------------------------------------------------
 // One left, unfound for longer than AWARE.straggle: it goes looking for the
@@ -413,9 +598,69 @@ await sleep(2000);
   check('four players: one horde', same, sets.map((s) => s.size).join(' / ') + ' figures, host / guests');
 }
 
+// --- a friend's shot at a figure, seen by a third ----------------------------------
+// The guest shoots a figure the host holds still, five metres off; a third page
+// draws the red splash, and the host, which drew it as it took the health off,
+// does not draw it again.
+{
+  const r = await run(A, () => {
+    const I = window.__ink, G = I.game, en = G.ctx.enemies, lv = G.ctx.level;
+    const V = I.player.body.pos.constructor;
+    for (const s of lv.spawnPool) {
+      for (let a = 0; a < 6.28; a += 0.5) {
+        const q = new V(s.x + Math.cos(a) * 5, s.y + 1.5, s.z + Math.sin(a) * 5);
+        const down = I.raycastLevel(q, new V(0, -1, 0), 3);
+        if (!down || Math.abs(down.point.y - s.y) > 0.3) continue;
+        const eye = new V(s.x, s.y + 1.2, s.z);
+        const d = q.clone().sub(eye);
+        if (I.raycastLevel(eye, d.clone().normalize(), d.length())) continue;
+        en.clear();
+        G.waves.toSpawn = [];
+        G.waves.state = 'clearing';
+        window.__think = en.think;
+        en.think = () => {};
+        const e = en.spawn('punch', new V(s.x, s.y, s.z), { mind: 'hunt' });
+        e.body.pos.set(s.x, s.y, s.z);
+        return { id: e.id, at: [q.x, down.point.y + 0.05, q.z] };
+      }
+    }
+    return null;
+  });
+  await held(0);
+  await run(B, (p) => window.__ink.teleport(p[0], p[1], p[2]), r.at);
+  await until(B, (i) => window.__ink.net.horde.list().some((e) => e.id === i), r.id, 3000);
+  await sleep(800);
+  const [onC, onA] = [(await drawnOf(C)).splashes, (await drawnOf(A)).splashes];
+  let hit = false;
+  for (let i = 0; i < 4 && !hit; i++) {
+    hit = await run(B, (id) => {
+      const I = window.__ink, G = I.game, e = G.ctx.enemies.byId(id), p = I.player;
+      const d = e.center.clone().sub(p.eye);
+      I.face(Math.atan2(-d.x, -d.z), Math.atan2(d.y, Math.hypot(d.x, d.z)));
+      p.camera.rotation.set(p.pitch, p.yaw, 0, 'YXZ');
+      p.camera.updateMatrixWorld();
+      const fx = G.effects, was = fx.hit;
+      let splash = false;
+      fx.hit = (...a) => { splash = true; was.apply(fx, a); };
+      G.weapon.spreadLive = 0;
+      G.weapon.fire();
+      fx.hit = was;
+      return splash;
+    }, r.id);
+    if (!hit) await sleep(200);
+  }
+  const seen = await until(C, (n) => window.__ink.net.crew.drawn.splashes > n, onC, 1500);
+  await sleep(300);
+  const twice = (await drawnOf(A)).splashes - onA;
+  await run(A, () => { const en = window.__ink.game.ctx.enemies; en.think = window.__think; en.clear(); });
+  check('a friend\'s hit: splashed on a third page', hit && seen && twice === 0,
+    `the guest hit it ${hit}; the splash on the third page ${seen}, drawn again by the host ${twice}`);
+}
+
 // --- frame times with friends ------------------------------------------------------
 // A phone-sized guest page at a phone's 6x CPU throttle, in the room's run with
-// everybody else, against the same page on its own a moment before. The other
+// everybody else, against the same page on its own a moment before. The friends
+// hold their triggers down while it is measured, so their shots are drawn too. The other
 // windows are small, but they share this machine's GPU, and they are drawing
 // for both measurements: the absolute numbers here say little (tools/perf.mjs
 // measures those, one window at a time), the difference says what friends cost.
@@ -442,13 +687,17 @@ await sleep(2000);
     for (let i = 0; i < 8; i++) G.ctx.enemies.spawn(i % 3 ? 'sketch' : 'cutter', G.ctx.level.spawns[i % G.ctx.level.spawns.length], { mind: 'hunt' });
   });
   await sleep(1500);
+  const shots0 = (await drawnOf(E)).tracers;
+  for (const p of [A, B, C, D]) await run(p, () => { window.__ink.input.fire = true; });
   await cdp2.send('Emulation.setCPUThrottlingRate', { rate: 6 });
   await sleep(2500);
   const crew = summarise(await frameTimes(E));
   await cdp2.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+  for (const p of [A, B, C, D]) await run(p, () => { window.__ink.input.fire = false; });
+  const shots = (await drawnOf(E)).tracers - shots0;
   const mates = (await st(E)).crew.length;
-  check('with friends: a phone\'s frames cost no more', crew.fps >= alone.fps * 0.85 && crew.p99 <= alone.p99 * 1.15 + 3,
-    `${crew.fps.toFixed(0)} fps median, p99 ${crew.p99.toFixed(1)} ms with ${mates} friends; alone ${alone.fps.toFixed(0)} fps, p99 ${alone.p99.toFixed(1)} ms (6x CPU throttle)`);
+  check('with friends: a phone\'s frames cost no more', crew.fps >= alone.fps * 0.85 && crew.p99 <= alone.p99 * 1.15 + 3 && shots > 0,
+    `${crew.fps.toFixed(0)} fps median, p99 ${crew.p99.toFixed(1)} ms with ${mates} friends firing (${shots} of their rounds drawn); alone ${alone.fps.toFixed(0)} fps, p99 ${alone.p99.toFixed(1)} ms (6x CPU throttle)`);
   await E.ctx.close();
 }
 

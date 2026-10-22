@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Smooth } from '@p3p2/client/smooth';
 import { TYPES, MODIFIERS } from '../entities/enemies/types.js';
-import { pose } from '../entities/enemies/rig.js';
+import { pose, pitchTo } from '../entities/enemies/rig.js';
 import { PICKUP } from '../entities/pickups.js';
 import { PLANES } from '../entities/planes.js';
 import { WAVES } from '../core/waves.js';
@@ -411,10 +411,13 @@ export class Horde {
     e.fig.root.rotation.y = e.yaw;
     const f = e.flags || 0;
     const reel = f & F_STAGGER ? 0.4 : 0;
+    const aim = !!(f & F_AIM);
     pose(e.fig.J, {
       t: e.phase + e.stateT,
       walk: e.walk,
-      aim: !!(f & F_AIM),
+      aim,
+      // at you, if it is you it is after; this page is not told who else it aims at
+      pitch: aim && e.target ? pitchTo(e.eye, e.target.center) : 0,
       raise: f & F_WIND ? 1 : e.raise || 0,
       cut: e.cut || 0,
       lean: e.walk * 0.25 - reel * 0.9 + (f & F_CHARGE ? 0.7 : 0),

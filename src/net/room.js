@@ -33,7 +33,7 @@ export class Net {
     this.p3p2 = p3p2;
     this.ctx = game.ctx;
     this.room = null;
-    this.crew = new Crew(game.ctx, document.getElementById('hud'));
+    this.crew = new Crew(game.ctx, document.getElementById('hud'), game);
     this.horde = new Horde(game, this);
     /** The room's run, as the room last said. */
     this.run = null;
@@ -68,6 +68,8 @@ export class Net {
     const g = this.game;
     this.crew.start(r);
     this.horde.start(r);
+    // what this page's player's weapons do, for the others to see (net/crew.js `pf`)
+    this.ctx.tell = this.crew;
     this.run = validRun(r.retained('run'));
     this.knows = false;
     this._offs.push(
@@ -102,6 +104,7 @@ export class Net {
     if (!this.room) return;
     for (const off of this._offs) off();
     this._offs = [];
+    this.ctx.tell = null;
     this.crew.stop();
     this.horde.stop();
     this.horde.alone();
@@ -234,7 +237,8 @@ export class Net {
     ctx.pickups.update(dt, playing ? ctx.player : null);
     ctx.planes.update(dt);
     this.horde.tick(dt);
-    this.crew.say(ctx.player, g.inRun() ? g.runId : 0, g.kills);
+    this.crew.say(ctx.player, g.inRun() ? g.runId : 0, g.kills, g.weapon.key);
+    this.crew.flush(dt);
     this.crew.draw(dt);
     this.checkT -= dt;
     if (this.checkT <= 0) {

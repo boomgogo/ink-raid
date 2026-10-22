@@ -25,7 +25,7 @@ From `CLAUDE.md`:
 | `world/` | the desk: `build.js` (geometry and colliders), `map_desk.js` (the level), `movers.js` (things that move and carry you), the train, the pendulum and cradle, the sky, the title-screen flight, a calibration scene |
 | `core/` | physics and collision, input, waves, difficulty, springs |
 | `entities/` | the player, the jetpack, weapons, enemies (types, rigs, AI), pickups, paper planes |
-| `net/` | co-op through p3p2: `room.js` (the room and its run), `crew.js` (the other players), `horde.js` (the host's figures, rounds, waves and pickups, as the others see them), `wire.js` (the binary reports) |
+| `net/` | co-op through p3p2: `room.js` (the room and its run), `crew.js` (the other players, and their shots, slashes and grenades), `horde.js` (the host's figures, rounds, waves and pickups, as the others see them), `wire.js` (the binary reports) |
 | `fx/` | particles, tracers and decals; synthesised audio |
 | `ui/` | the HUD, the touch controls, hand-drawn buttons |
 
@@ -73,7 +73,22 @@ paper.
   - the host's page runs the figures, the waves, the planes and the pickups; the others draw them
     140 ms in the past and send the host their hits;
   - when the host leaves, the next player takes the figures over;
+  - a friend is drawn with the gun in their hands, aimed where they look (`w` and `pt` in what
+    each page sends);
+  - their shots, slashes and grenades go to the others as `pf` (`net/crew.js`), and are drawn as
+    late as the figure is: tracers from the drawn gun, blots on the desk, red splashes on figures.
+    It is for show only, since hits still go to the host as `hit`. Their shots and blasts are heard
+    within 60 m;
+  - a friend is drawn with no coasting (`Smooth`, `coast: 0`). A page stops sending once its
+    player stands still, and coasting carried a landing on through the floor;
   - alone, the page loads p3p2's 2 KB entry and asks no server anything.
+- **Touch** (`ui/touch.js`):
+  - INK sits in the bottom-right corner, with DUCK, UP, JET and BLAST on an arc round it;
+  - LOAD, NEXT and WRAP are a row of small buttons along the top right, and the wave readout
+    moves down under them;
+  - a second INK at the top left only holds the trigger, so the left thumb fires while the right
+    thumb aims;
+  - `npm run touch` checks the layout on four phones, upright and on their side.
 - **The build** shows in the bottom-left corner as `v.` and four characters of its commit
   (`vite.config.js`), on the boot splash too. p3p2's game version is 12 characters of the commit,
   plus the build time when the tree is dirty.
@@ -122,6 +137,13 @@ and the figure-legibility band. Both are measured from this build.
   comments, and `npm run distcheck` checks that it did.
 - **Test hooks:** `window.__ink` exposes hooks for the tools: poses, teleports, the game object and
   stats.
+- **Figures face −z.**
+  - `pose()` (`entities/enemies/rig.js`) lays the gun along the facing, tipped by `pitch`,
+    whatever the arms are doing.
+  - Until plan 3 the aim and the lean were written for a figure facing +z: every gun was held
+    behind its figure's back, pointing at the floor.
+  - `npm run collide` checks that every gun points where its figure aims, and that every hit
+    volume stays inside its bound in every pose.
 
 ## Tuning
 
@@ -168,6 +190,9 @@ Found by the bot's runs (see `ai/next_1.md`), all in `entities/enemies/manager.j
   them, a straggler goes looking for the nearest, a nest sniper moves to a nest that sees anyone,
   and a trapped figure is redrawn out of everybody's sight. A player who is down is nobody's
   target, and no round is judged on their page.
+- **Not yet handled:** a nest sniper that is the last figure, when no nest can see any player.
+  - `renest` has nowhere to move it, and `trapped` skips stationary figures.
+  - So the wave waits until the player finds it. The bot never does: see `ai/next_3.md`.
 
 ## Known issues and next steps
 
@@ -186,9 +211,17 @@ Found by the bot's runs (see `ai/next_1.md`), all in `entities/enemies/manager.j
   - `npm run perf` measures 1280x800.
   - A newer integrated GPU is two to three times faster.
 - **Off-screen damage:** about 40% of the bot's hits came from enemies not on screen.
-- **Desktop frame budget:** `npm run perf`'s worst 1% of desktop frames sits on its 33 ms limit
-  (34.1 ms before plan 2), and has since itr 1.
+- **Desktop frame budget:** `npm run perf`'s worst 1% of desktop frames is close to its 33 ms
+  limit.
+  - It sat on the limit from itr 1 to plan 2, at 34.1 ms before plan 2.
+  - In plan 3 it measured 26.5 ms, and 24.6 ms for the build before it, in three runs each
+    alternating. That points to the machine's state, not the code.
 - **Co-op by hand:** the phone over the LAN has only been tried through `tools/coop.mjs`'s phone
   profile, not on a real phone.
+- **Idle arms:** at rest a figure's arms cross in front of its chest, because `pose()` sets their
+  spread with the wrong sign.
+  - `figures.mjs`'s legibility band was tuned on that look, so it was left alone in plan 3.
+  - `figures.mjs` also turns its lineup to face away from the camera, though its comment says
+    "facing the camera".
 - **Jetpack-only tops:** `npm run reach` lists them and checks a gun can see each one (all can, as
   of plan 2). A new tall thing on the desk should be checked the same way.

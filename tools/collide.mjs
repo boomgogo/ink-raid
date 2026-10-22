@@ -37,6 +37,9 @@ import { ghostsInWalkableSpace } from './lib/ghosts.mjs';
 import { thingOverlaps, unowned, sunk, overlapDepth, drawnPrimitives, sdf } from './lib/overlap.mjs';
 import { touchesColumn } from '../src/core/physics.js';
 import { flightCurve } from '../src/world/flight.js';
+import { TYPES } from '../src/entities/enemies/types.js';
+import { buildFigure, pose } from '../src/entities/enemies/rig.js';
+import { FRIEND } from '../src/net/crew.js';
 
 // --- the primitives, before anything is launched ---------------------------
 //
@@ -526,6 +529,80 @@ import { flightCurve } from '../src/world/flight.js';
   }
 
   console.log(bad ? `\n  ${bad} primitive checks FAILED\n` : '\n  every primitive collides as it is drawn, and bodies stay out of it\n');
+  if (bad) process.exit(1);
+}
+
+// --- the figures' poses, before anything is launched -----------------------
+//
+// Every figure, posed the ways the game poses it, asked two things.
+//
+// Does the gun point where the figure aims? A figure faces −z. The aim pose was
+// once written for one facing +z, and every gun on the desk was held behind its
+// figure's back, pointing at the floor: nothing here looked, so nothing said.
+//
+// Does every hit volume stay inside the one sphere raycast() tries first
+// (`bound`, widened by POSE_SWING)? A part that swings out of it is drawn and
+// cannot be hit.
+{
+  const V = (x, y, z) => new THREE.Vector3(x, y, z);
+  let bad = 0;
+  const check = (name, ok, detail = '') => {
+    if (!ok) bad++;
+    console.log(` ${ok ? 'PASS' : 'FAIL'}  ${name.padEnd(34)} ${detail}`);
+  };
+  const figures = Object.entries(TYPES).map(([k, t]) => ({ name: k, t, prop: t.look.prop }));
+  for (const prop of FRIEND.look.props) figures.push({ name: `friend ${prop}`, t: FRIEND, prop });
+  const GUNS_HELD = new Set(['rifle', 'shotgun', 'sniper', 'pistol', 'staples', 'marker', 'tape']);
+  const AIMS = [-0.6, 0, 0.6];
+  const poses = [
+    { name: 'rest', o: { walk: 0 } },
+    ...[0, 0.12, 0.24, 0.36, 0.48, 0.6].map((t) => ({ name: `walk ${t}`, o: { walk: 1, lean: 0.25, t } })),
+    ...[-1.2, ...AIMS, 1.2].flatMap((pitch) => [0, 1].map((walk) => ({ name: `aim ${pitch} walk ${walk}`, o: { aim: true, pitch, walk, lean: walk * 0.25 }, pitch }))),
+    ...[0.25, 0.6, 1].map((raise) => ({ name: `raise ${raise}`, o: { raise } })),
+    ...[0.3, 0.7, 1].map((cut) => ({ name: `cut ${cut}`, o: { raise: 1, cut } })),
+    { name: 'charging', o: { walk: 1, lean: 0.95 } },
+    { name: 'reeling', o: { lean: -0.9, hurt: 1 } },
+    { name: 'flying', o: { flying: true, t: 0.3 } },
+  ];
+
+  let aimWorst = 0, aimNear = Infinity, back = [], outside = [];
+  const dir = V(0, 0, 0), grip = V(0, 0, 0), chest = V(0, 0, 0), a = V(0, 0, 0), b = V(0, 0, 0);
+  for (const f of figures) {
+    const fig = buildFigure(f.t);
+    if (fig.props?.[f.prop]) fig.props[f.prop].visible = true;
+    const centre = V(0, fig.bound.y, 0);
+    for (const p of poses) {
+      pose(fig.J, { t: 0, walk: 0, lean: 0, hurt: 0, aim: false, ...p.o });
+      fig.root.updateMatrixWorld(true);
+      const gun = GUNS_HELD.has(f.prop);
+      if (gun) {
+        dir.set(0, 0, -1).transformDirection(fig.J.grip.matrixWorld);
+        fig.J.grip.getWorldPosition(grip);
+        fig.J.chest.getWorldPosition(chest);
+        if (p.o.aim && AIMS.includes(p.pitch)) {
+          // along the aim, and out in front of the chest
+          const off = (dir.angleTo(V(0, Math.sin(p.pitch), -Math.cos(p.pitch))) * 180) / Math.PI;
+          aimWorst = Math.max(aimWorst, off);
+          aimNear = Math.min(aimNear, chest.z - grip.z);
+          if (off > 10 || chest.z - grip.z < 0.25) back.push(`${f.name} ${p.name}: ${off.toFixed(0)} deg off, grip ${(chest.z - grip.z).toFixed(2)} m ahead`);
+        } else if (!p.o.raise && dir.z >= 0) {
+          back.push(`${f.name} ${p.name}: barrel points back`);
+        }
+      }
+      for (const h of fig.hit) {
+        const m = h.node.matrixWorld;
+        if (h.at) { a.set(...h.at).applyMatrix4(m); b.copy(a); }
+        else { a.set(0, h.off || 0, 0).applyMatrix4(m); b.set(0, (h.off || 0) - h.len, 0).applyMatrix4(m); }
+        const far = Math.max(a.distanceTo(centre), b.distanceTo(centre)) + h.r;
+        if (far > fig.bound.r + 1e-3) outside.push(`${f.name} ${p.name} ${h.part} by ${(far - fig.bound.r).toFixed(2)} m`);
+      }
+    }
+  }
+  check('guns point where their figures aim', back.length === 0,
+    back.length ? back.slice(0, 3).join('; ') : `worst ${aimWorst.toFixed(1)} deg off the aim, every grip ${aimNear.toFixed(2)} m or more ahead of the chest`);
+  check('every hit volume inside its bound', outside.length === 0,
+    outside.length ? `${outside.length}: ${outside.slice(0, 3).join('; ')}` : `${figures.length} figures in ${poses.length} poses`);
+  console.log('');
   if (bad) process.exit(1);
 }
 

@@ -89,21 +89,23 @@ export class Audio {
 
   // --- the game -------------------------------------------------------------
 
-  shot(kind) {
+  /** `near`: 1 for your own, less for a friend's further off (net/crew.js). */
+  shot(kind, near = 1) {
+    if (near <= 0.02) return;
     if (kind === 'shotgun') {
-      this.noise({ dur: 0.26, freq: 2600, decay: 0.08, gain: 0.5, type: 'lowpass' });
-      this.tone({ freq: 130, to: 44, dur: 0.16, type: 'square', gain: 0.22 });
+      this.noise({ dur: 0.26, freq: 2600, decay: 0.08, gain: 0.5 * near, type: 'lowpass' });
+      this.tone({ freq: 130, to: 44, dur: 0.16, type: 'square', gain: 0.22 * near });
     } else if (kind === 'stapler') {
       // a spring and a thunk, not a bang
-      this.noise({ dur: 0.05, freq: 3000, q: 4, type: 'bandpass', gain: 0.3, decay: 0.4 });
-      this.tone({ freq: 180, to: 90, dur: 0.06, type: 'square', gain: 0.16 });
+      this.noise({ dur: 0.05, freq: 3000, q: 4, type: 'bandpass', gain: 0.3 * near, decay: 0.4 });
+      this.tone({ freq: 180, to: 90, dur: 0.06, type: 'square', gain: 0.16 * near });
     } else if (kind === 'sniper') {
-      this.noise({ dur: 0.42, freq: 5200, decay: 0.04, gain: 0.5 });
-      this.tone({ freq: 200, to: 40, dur: 0.34, type: 'sawtooth', gain: 0.2 });
-      this.noise({ dur: 0.5, freq: 900, q: 6, type: 'bandpass', gain: 0.12, decay: 0.5 });  // the tail
+      this.noise({ dur: 0.42, freq: 5200, decay: 0.04, gain: 0.5 * near });
+      this.tone({ freq: 200, to: 40, dur: 0.34, type: 'sawtooth', gain: 0.2 * near });
+      this.noise({ dur: 0.5, freq: 900, q: 6, type: 'bandpass', gain: 0.12 * near, decay: 0.5 });  // the tail
     } else {
-      this.noise({ dur: 0.10, freq: 3400, decay: 0.12, gain: 0.34 });
-      this.tone({ freq: 240, to: 80, dur: 0.07, type: 'square', gain: 0.13 });
+      this.noise({ dur: 0.10, freq: 3400, decay: 0.12, gain: 0.34 * near });
+      this.tone({ freq: 240, to: 80, dur: 0.07, type: 'square', gain: 0.13 * near });
     }
   }
 
@@ -122,16 +124,20 @@ export class Audio {
     this.noise({ dur: 0.2, freq: 1400, decay: 0.2, gain: 0.16 });
   }
 
-  swing() { this.noise({ dur: 0.14, freq: 900, q: 4, type: 'bandpass', gain: 0.2, decay: 3 }); }
+  swing(near = 1) {
+    if (near <= 0.02) return;
+    this.noise({ dur: 0.14, freq: 900, q: 4, type: 'bandpass', gain: 0.2 * near, decay: 3 });
+  }
 
   bladeStrike() {
     this.tone({ freq: 2100, to: 1200, dur: 0.12, type: 'triangle', gain: 0.2 });
     this.noise({ dur: 0.14, freq: 3200, decay: 0.2, gain: 0.22 });
   }
 
-  explosion() {
-    this.noise({ dur: 0.7, freq: 1400, decay: 0.05, gain: 0.55 });
-    this.tone({ freq: 90, to: 28, dur: 0.5, type: 'sawtooth', gain: 0.3 });
+  explosion(near = 1) {
+    if (near <= 0.02) return;
+    this.noise({ dur: 0.7, freq: 1400, decay: 0.05, gain: 0.55 * near });
+    this.tone({ freq: 90, to: 28, dur: 0.5, type: 'sawtooth', gain: 0.3 * near });
   }
 
   throwNade() { this.noise({ dur: 0.12, freq: 700, q: 3, type: 'bandpass', gain: 0.14, decay: 2 }); }

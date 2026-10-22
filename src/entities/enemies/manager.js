@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { buildFigure, pose } from './rig.js';
+import { buildFigure, pose, pitchTo } from './rig.js';
 import { TYPES } from './types.js';
 import { newBody, stepBody, raycast, rayCapsule, raySphere, onLadder, ladderLocal, GRAVITY } from '../../core/physics.js';
 import { LADDER, MOVE } from '../player.js';
@@ -843,6 +843,7 @@ export class Enemies {
       t: e.phase + e.stateT,
       walk: e.walk,
       aim: aiming,
+      pitch: aiming ? pitchTo(e.eye, p.center) : 0,
       raise: e.raise,
       cut: e.cut,
       lean: e.walk * 0.25 - reel * 0.9 + (e.chargeState === 'run' ? 0.7 : 0),

@@ -111,34 +111,82 @@ const shown = await page.evaluate(() => {
 });
 check('touch layer enabled', shown, 'on a coarse pointer, before the run starts');
 
-// --- touch targets are big enough -------------------------------------------
-// 44 CSS px is the floor every platform guideline agrees on, and it is the one
-// thing about a touch layout that can be checked without a hand.
-const small = await page.evaluate(() => {
-  const out = [];
-  for (const b of document.querySelectorAll('.touch .tbtn')) {
-    if (getComputedStyle(b).display === 'none') continue;      // HEAL, with nothing to heal with
-    const r = b.getBoundingClientRect();
-    if (r.width < 44 || r.height < 44) out.push(`${b.textContent.trim()} ${Math.round(r.width)}x${Math.round(r.height)}`);
-  }
-  return out;
-});
-check('touch targets >= 44px', small.length === 0, small.length ? small.join(', ') : 'every button clears the 44px floor');
-
-// --- controls are on screen, not off the edge -------------------------------
-const offscreen = await page.evaluate(() => {
-  const vw = innerWidth, vh = innerHeight;
-  const out = [];
-  for (const b of document.querySelectorAll('.touch .tbtn')) {
-    if (getComputedStyle(b).display === 'none') continue;
-    const r = b.getBoundingClientRect();
-    if (r.left < 0 || r.top < 0 || r.right > vw || r.bottom > vh) {
-      out.push(`${b.textContent.trim()} @${Math.round(r.left)},${Math.round(r.top)}`);
+// --- the layout, on four phones -----------------------------------------------
+// Each in a run, carrying a bandage (so WRAP is up) and the katana (so the blade
+// gauge is): the most there is on the screen at once. Four things that can be
+// checked without a hand:
+//
+//   every button clears 44 CSS px, the floor every platform guideline agrees on;
+//   every button is on the screen;
+//   no button sits on another;
+//   no button sits on a readout: a number or a word the HUD is showing.
+//
+// A button is round, and a touch lands only inside its circle, so it is asked
+// as a circle: two on an arc have square boxes that cross at their corners.
+//
+// All eight buttons were once in the bottom-right corner. In a landscape phone
+// they filled 80% of its height, and sat on the weapon's name and slot list,
+// with every check here green: none of them was asked in landscape.
+const PHONES = [[390, 844], [844, 390], [360, 740], [740, 360]];
+for (const [w, h] of PHONES) {
+  const lctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  const lp = await lctx.newPage();
+  lp.on('pageerror', (e) => errors.push(`THROW (${w}x${h}) ${e.message}`));
+  await lp.goto(URL_BASE, { waitUntil: 'load' });
+  await lp.waitForFunction(() => window.__inkReady === true, { timeout: 30000 });
+  await sleep(500);
+  await lp.evaluate(() => {
+    const G = window.__ink.game;
+    G.startRun();
+    G.waves.stop();
+    G.ctx.enemies.clear();
+    window.__ink.player.damage = () => {};
+    G.take('bandage');
+    G.selectWeapon(3);
+  });
+  await sleep(900);
+  const r = await lp.evaluate(() => {
+    const shown = (el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
+    const btns = [...document.querySelectorAll('.touch .tbtn')].filter((b) => getComputedStyle(b).display !== 'none')
+      .map((b) => ({ name: b.textContent.trim() + (b.dataset.fire === 'hold' ? ' (left)' : ''), r: b.getBoundingClientRect() }));
+    const circle = (r) => ({ x: (r.left + r.right) / 2, y: (r.top + r.bottom) / 2, r: r.width / 2 });
+    const touch = (a, b) => Math.hypot(a.x - b.x, a.y - b.y) < a.r + b.r;
+    const onBox = (c, q) => Math.hypot(c.x - Math.max(q.left, Math.min(c.x, q.right)), c.y - Math.max(q.top, Math.min(c.y, q.bottom))) < c.r;
+    // a readout's ink, tightly: each word and each leaf element, not the boxes they sit in
+    const ink = [];
+    const sel = ['.ir-top-l', '.ir-top-r', '.ir-feed', '.ir-bl', '.ir-br', '.ir-edge.ir-on', '#hud .ir-version'];
+    for (const root of document.querySelectorAll(sel.join(','))) {
+      if (!shown(root)) continue;
+      const walk = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+      for (let n = walk.currentNode; n; n = walk.nextNode()) {
+        if (n.nodeType === 3) {
+          if (!n.textContent.trim() || !shown(n.parentElement) || +getComputedStyle(n.parentElement).opacity === 0) continue;
+          const range = document.createRange();
+          range.selectNodeContents(n);
+          for (const q of range.getClientRects()) if (q.width > 0) ink.push({ name: n.textContent.trim().slice(0, 16), r: q });
+        } else if (!n.firstElementChild && !n.textContent.trim() && shown(n) && +getComputedStyle(n).opacity > 0) {
+          const q = n.getBoundingClientRect();
+          if (q.width > 0 && q.height > 0) ink.push({ name: n.getAttribute('class') || n.tagName, r: q });
+        }
+      }
     }
-  }
-  return out;
-});
-check('controls within the screen', offscreen.length === 0, offscreen.length ? offscreen.join(', ') : `all inside 390x844`);
+    const out = { small: [], off: [], stacked: [], covers: [] };
+    for (const [i, b] of btns.entries()) {
+      if (b.r.width < 44 || b.r.height < 44) out.small.push(`${b.name} ${Math.round(b.r.width)}`);
+      if (b.r.left < 0 || b.r.top < 0 || b.r.right > innerWidth || b.r.bottom > innerHeight) out.off.push(b.name);
+      for (const o of btns.slice(i + 1)) if (touch(circle(b.r), circle(o.r))) out.stacked.push(`${b.name} on ${o.name}`);
+      for (const t of ink) if (onBox(circle(b.r), t.r)) out.covers.push(`${b.name} on "${t.name}"`);
+    }
+    return { ...out, n: btns.length, readouts: ink.length };
+  });
+  await lp.screenshot({ path: path.join(root, 'shots', 'stills', `touch-${w}x${h}.png`), scale: 'css' });
+  const at = `${w}x${h}`;
+  check(`${at}: buttons >= 44px`, r.small.length === 0, r.small.length ? r.small.join(', ') : `all ${r.n} clear the 44px floor`);
+  check(`${at}: buttons on the screen`, r.off.length === 0, r.off.length ? r.off.join(', ') : `all ${r.n} inside ${at}`);
+  check(`${at}: no button on another`, r.stacked.length === 0, r.stacked.join(', ') || 'none touch');
+  check(`${at}: no button on a readout`, r.covers.length === 0, r.covers.slice(0, 4).join(', ') || `${r.readouts} bits of the HUD all clear`);
+  await lctx.close();
+}
 
 // --- into the game ----------------------------------------------------------
 await page.evaluate(() => window.__ink.game.startRun());
@@ -190,7 +238,7 @@ check('tap fires the weapon', mag1 < mag0, `mag ${mag0} -> ${mag1}`);
 // --- FIRE: hold to keep firing, drag on it to aim while you do ---------------
 {
   const fireAt = await page.evaluate(() => {
-    const b = document.querySelector('.touch .tfire');
+    const b = document.querySelector('.touch [data-fire="aim"]');
     if (!b) return null;
     const r = b.getBoundingClientRect();
     return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
@@ -218,6 +266,48 @@ check('tap fires the weapon', mag1 < mag0, `mag ${mag0} -> ${mag1}`);
   }
 }
 
+// --- the left INK: the trigger for the left thumb, while the right one aims -----
+{
+  const leftAt = await page.evaluate(() => {
+    const r = document.querySelector('.touch [data-fire="hold"]').getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  });
+  const full = () => page.evaluate(() => { const w = window.__ink.game.weapon; w.mag = w.stats.ammo.clipSize; w.reloading = 0; return w.mag; });
+  const yaw = () => page.evaluate(() => window.__ink.player.yaw);
+
+  await sleep(300);
+  let m0 = await full();
+  await tap(leftAt.x, leftAt.y, 500);
+  await sleep(150);
+  check('left INK held fires', m0 - (await state()).mag >= 4, `${m0 - (await state()).mag} rounds from holding it for 0.5 s`);
+
+  await sleep(300);
+  m0 = await full();
+  await tap(leftAt.x, leftAt.y, 50);
+  await sleep(300);
+  const tapped = m0 - (await state()).mag;
+  check('left INK tapped fires', tapped >= 1 && tapped <= 2, `${tapped} rounds from a tap`);
+
+  await sleep(300);
+  await full();
+  const y0 = await yaw();
+  await drag(leftAt, { x: leftAt.x + 120, y: leftAt.y + 30 }, 30, 0);
+  await sleep(150);
+  check('left INK drag does not turn', Math.abs((await yaw()) - y0) < 0.02, `view turned ${Math.abs((await yaw()) - y0).toFixed(3)} rad on a drag across it`);
+
+  // both thumbs at once: the left holds INK, the right drags on the look pad
+  await sleep(300);
+  m0 = await full();
+  const y1 = await yaw();
+  const held = tap(leftAt.x, leftAt.y, 900);
+  await sleep(60);
+  await drag({ x: 300, y: 400 }, { x: 200, y: 420 }, 30, 0);
+  await held;
+  await sleep(150);
+  const fired = m0 - (await state()).mag, turned = Math.abs((await yaw()) - y1);
+  check('left INK and look pad together', fired >= 4 && turned > 0.15, `${fired} rounds, view turned ${turned.toFixed(2)} rad`);
+}
+
 // --- buttons reach their actions -------------------------------------------
 const btnBoxes = await page.evaluate(() => {
   const out = {};
@@ -240,6 +330,20 @@ if (btnBoxes.jump) {
   await sleep(700);
 } else {
   check('JUMP button', false, 'no jump button found');
+}
+
+{
+  const swapAt = await page.evaluate(() => {
+    const r = document.querySelector('.touch [data-swap]').getBoundingClientRect();
+    return [r.left + r.width / 2, r.top + r.height / 2];
+  });
+  const k0 = await page.evaluate(() => window.__ink.game.weapon.key);
+  await tap(swapAt[0], swapAt[1], 80);
+  await sleep(300);
+  const k1 = await page.evaluate(() => window.__ink.game.weapon.key);
+  check('NEXT button', k1 !== k0, `${k0} -> ${k1}`);
+  await page.evaluate(() => window.__ink.game.selectWeapon(0));
+  await sleep(400);
 }
 
 if (btnBoxes.reload) {
@@ -412,11 +516,12 @@ console.log(`\n${passed}/${results.length} passed`);
 console.log(`
 Still needs a human with a phone — none of the above can answer these:
   [ ] can you reach UP and JET without regripping?
+  [ ] can you reach the left INK without letting go of the phone, and aim with the right thumb while you hold it?
+  [ ] are LOAD, NEXT and WRAP, along the top, where you can reach them when you need them?
   [ ] does the floating stick appear under your thumb, or somewhere you have to reach for?
   [ ] is look sensitivity right, and can you make a small correction?
   [ ] does tap-to-fire misfire while you are turning?
   [ ] can you reach FIRE, and still see what you are shooting at while you hold it?
-  [ ] can you reach HEAL mid-fight without letting go of the stick?
   [ ] does anything important sit under the notch or the home indicator?
   [ ] does your thumb cover the thing you are shooting at?
 `);

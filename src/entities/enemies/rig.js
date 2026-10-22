@@ -147,7 +147,20 @@ export function buildFigure(t, penId = INK.RED) {
   const grip = new THREE.Group();
   grip.position.set(0, -0.22, 0);
   armFR.add(grip);
-  addProp(grip, t.look.prop, line, solid);
+  // A friend carries every gun a player can hold (`look.props`), each in a
+  // group of its own, and shows the one in their hands: a hidden mesh is not
+  // drawn, so the others cost nothing.
+  const props = {};
+  if (t.look.props) {
+    for (const kind of t.look.props) {
+      props[kind] = new THREE.Group();
+      props[kind].visible = false;
+      grip.add(props[kind]);
+      addProp(props[kind], kind, line, solid);
+    }
+  } else {
+    addProp(grip, t.look.prop, line, solid);
+  }
 
   root.scale.setScalar(t.frame.scale || 1);
 
@@ -207,6 +220,7 @@ export function buildFigure(t, penId = INK.RED) {
   return {
     root,
     J: { pivot, pelvis, chest, head, armUL, armUR, armFL, armFR, legUL, legUR, legFL, legFR, grip },
+    props,
     materials: [line, solid],
     hit,
     bound,
@@ -391,15 +405,48 @@ function addProp(gun, kind, line, solid) {
   }
 }
 
+/** How far up from `from` `to` is, as an angle above level: the `pitch` that aims at it. */
+export function pitchTo(from, to) {
+  return Math.atan2(to.y - from.y, Math.hypot(to.x - from.x, to.z - from.z));
+}
+
+const X_AXIS = new THREE.Vector3(1, 0, 0);
+const _qa = new THREE.Quaternion();
+const _qb = new THREE.Quaternion();
+
+/**
+ * Lay the gun along where the figure aims: level along the way it faces, tipped
+ * up by `pitch`. The grip's turn is whatever undoes the arm it rides on, worked
+ * out from the joints pose() has just set, so the arms can be posed for looks
+ * without moving the barrel off its line.
+ */
+function layGun(J, pitch) {
+  _qa.setFromEuler(J.pivot.rotation)
+    .multiply(_qb.setFromEuler(J.pelvis.rotation))
+    .multiply(_qb.setFromEuler(J.chest.rotation))
+    .multiply(_qb.setFromEuler(J.armUR.rotation))
+    .multiply(_qb.setFromEuler(J.armFR.rotation))
+    .invert();
+  J.grip.quaternion.copy(_qa.multiply(_qb.setFromAxisAngle(X_AXIS, pitch)));
+}
+
 /**
  * Pose a figure. Everything is arithmetic on a phase — no clips, no blending.
- * `walk` is how much the legs should be moving, `t` a running phase.
+ * `walk` is how much the legs should be moving, `t` a running phase, `pitch`
+ * how far up (or down, below 0) it aims, in radians.
+ *
+ * A figure faces −z: its eyes are there, and its yaw is the way it looks. A
+ * positive turn about x brings a hanging limb forward and up, and tips the
+ * chest back. The aim and the lean were once written the other way round, for
+ * a figure facing +z: every gun was held behind the back, pointing at the
+ * floor, and walkers leaned backwards.
  */
 export function pose(J, o) {
-  const { t, walk, aim, lean, dead, hurt, flying, raise = 0, cut = 0 } = o;
+  const { t, walk, aim, lean, dead, hurt, flying, raise = 0, cut = 0, pitch = 0 } = o;
   const p = t * 9;
 
   if (dead) {
+    J.grip.quaternion.identity();
     // Death is not a ragdoll: the figure crumples and the whole drawing tips
     // over, which is what a drawing being scribbled out looks like.
     const k = Math.min(1, o.downFor * 3.4);
@@ -421,8 +468,9 @@ export function pose(J, o) {
   J.pivot.position.y = flying ? Math.sin(t * 4) * 0.08 : Math.abs(Math.sin(p)) * 0.045 * walk;
   J.pelvis.rotation.y = swing * 0.12;
   J.chest.rotation.y = -swing * 0.16;
-  J.chest.rotation.x = lean * 0.5 + walk * 0.18;
-  J.head.rotation.x = -lean * 0.35 + (hurt || 0) * 0.5;
+  // leaning into the walk, and the head held up against it; hurt throws it back
+  J.chest.rotation.x = -(lean * 0.5 + walk * 0.18);
+  J.head.rotation.x = lean * 0.35 + (hurt || 0) * 0.5 + (aim ? pitch * 0.5 : 0);
 
   if (flying) {
     J.legUL.rotation.x = -0.5 + Math.sin(t * 5) * 0.2;
@@ -451,13 +499,15 @@ export function pose(J, o) {
     J.armUL.rotation.x = -0.6 * up;
     J.armUL.rotation.z = PROPORTION.armSpread;
     J.armFL.rotation.x = 0.5;
-    J.chest.rotation.x += -0.25 * up + 0.35 * cut;
+    // back through the wind-up, forward into the cut
+    J.chest.rotation.x += 0.25 * up - 0.35 * cut;
   } else if (aim) {
-    // both hands to the prop, pointing where it is looking
-    J.armUR.rotation.x = -1.42;
+    // Both hands to the prop, out in front at the shoulder and raised or
+    // lowered with the aim; the gun is laid on its line below.
+    J.armUR.rotation.x = 1.42 + pitch * 0.8;
     J.armUR.rotation.z = -0.34;
     J.armFR.rotation.x = 0.12;
-    J.armUL.rotation.x = -1.3;
+    J.armUL.rotation.x = 1.3 + pitch * 0.8;
     J.armUL.rotation.z = 0.62;
     J.armFL.rotation.x = 0.4;
   } else {
@@ -468,4 +518,8 @@ export function pose(J, o) {
     J.armFR.rotation.x = 0.25 + Math.max(0, swing2) * 0.5;
     J.armFL.rotation.x = 0.25 + Math.max(0, swing) * 0.5;
   }
+  // Anywhere else the prop rides the forearm as it was built: forward from a
+  // hanging hand, up with the blade in a wind-up.
+  if (aim && !(raise > 0 || cut > 0)) layGun(J, pitch);
+  else J.grip.quaternion.identity();
 }

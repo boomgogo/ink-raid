@@ -346,12 +346,20 @@
     mask: radial-gradient(circle at 50% 50%, transparent calc(41vw - 1px), #000 41vw); }
 }
 
-/* When the touch layer is up, its thumb-button cluster owns the bottom-right
-   corner (see touch.js's BTNS, plus FIRE/SWAP/HEAL) — exactly where the
-   weapon name, hint and slot list sit by default. Move that cluster up clear
-   of the buttons rather than let either hide the other (spec: touch controls
-   must not cover a HUD readout, and vice versa). */
+/* When the touch layer is up, its buttons (touch.js) own the bottom-right
+   corner, a row along the top right, and a spot at the top left under the
+   score. The readouts that sit there by default move clear, rather than let
+   either hide the other (spec: touch controls must not cover a HUD readout,
+   and vice versa): the wave and the feed go down a row, the blade gauge goes
+   right of the left INK, and the weapon's name, hint and slot list go above the
+   buttons, or in landscape, where there is no room above them, to their left. */
+#hud.ir-touch .ir-top-r { top: 62px; }
+#hud.ir-touch .ir-feed { top: calc(62px + 7vh); }
+#hud.ir-touch .ir-edge { left: 108px; }
 #hud.ir-touch .ir-br { bottom: 46vh; }
+@media (orientation: landscape) {
+  #hud.ir-touch .ir-br { bottom: 2.4vh; right: 228px; }
+}
 
 /* ==================================================================== touch */
 
@@ -376,26 +384,17 @@
 }
 .tbtn.down { background: var(--ir-pen); color: var(--ir-paper); }
 
-/* FIRE, SWAP and HEAL have no per-button inline style (unlike the BTNS array
-   in touch.js), so their size and position live here. Placed clear of the
-   jump/crouch/jet/reload/grenade cluster (see BTNS): FIRE anchors the
-   bottom-right corner, big enough to rest a thumb on; SWAP and HEAL are small
-   satellites above it, stacked so neither the cluster nor each other overlap. */
+/* Where each button is, and how big, is touch.js's: here is only how they look. */
 .tfire {
-  right: 14px; bottom: 10px; width: 92px; height: 92px;
   border-color: var(--ir-danger); color: var(--ir-danger); font-size: 14px;
   background: color-mix(in srgb, var(--ir-paper) 50%, transparent);
 }
 .tfire.down { background: var(--ir-danger); color: var(--ir-paper); }
 
-/* Tucked into the gap between DUCK and JET rather than stacked on the
-   right edge, which put it on top of JET. */
-.tswap { right: 109px; bottom: 132px; width: 44px; height: 44px; font-size: 9px; }
+/* the row along the top: LOAD, NEXT, WRAP */
+.tsmall { font-size: 9px; }
 
-.theal {
-  right: 14px; bottom: 200px; width: 48px; height: 48px;
-  display: none; border-color: var(--ir-accent); color: var(--ir-accent); font-size: 10px;
-}
+.theal { display: none; border-color: var(--ir-accent); color: var(--ir-accent); }
 .touch.heal .theal { display: flex; }
 .theal.down { background: var(--ir-accent); color: var(--ir-paper); }
 

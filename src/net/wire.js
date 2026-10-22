@@ -6,6 +6,9 @@
 
 const CM = 100;
 
+/** What a player's round ended on, as the others are told it (net/crew.js `pf`). */
+export const ENDED = { air: 0, desk: 1, figure: 2, plane: 3 };
+
 export class Writer {
   constructor(size = 2048) {
     this.buf = new ArrayBuffer(size);

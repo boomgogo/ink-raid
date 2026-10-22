@@ -5,6 +5,7 @@ import { IMPULSE } from '../../world/toys.js';
 import { INK } from '../../render/palette.js';
 import { buildRifle, buildShotgun, buildSniper, buildKatana, buildFlash, buildStapleGun } from './models.js';
 import { EM } from '../../ui/hud.js';
+import { ENDED } from '../../net/wire.js';
 
 // Weapons.
 //
@@ -478,7 +479,12 @@ export class Gun extends WeaponBase {
     this.root.updateMatrixWorld();
     _world.copy(this.muzzlePt).applyMatrix4(this.root.matrixWorld);
 
-    for (let i = 0; i < lethality.pellets; i++) this.shoot(_world);
+    // in a room, the others see the shot too: where each pellet ended, and on what (net/crew.js)
+    ctx.tell?.shot(this.key, lethality.pellets);
+    for (let i = 0; i < lethality.pellets; i++) {
+      const ended = this.shoot(_world);
+      ctx.tell?.pellet(_end, ended);
+    }
 
     // eject a casing sideways
     _tmp.copy(this.casingPort).applyMatrix4(this.root.matrixWorld);
@@ -488,6 +494,7 @@ export class Gun extends WeaponBase {
     this.spreadLive = Math.min(accuracy.bloomCap, this.spreadLive + accuracy.bloomPerShot);
   }
 
+  /** One pellet. Returns what it ended on: one of `ENDED`, with the place in `_end`. */
   shoot(from) {
     const ctx = this.ctx;
     const p = this.player;
@@ -513,7 +520,9 @@ export class Gun extends WeaponBase {
     // and the paper planes overhead, if nothing nearer took the round
     const planeHit = ctx.planes?.raycast(eye, _dir, enemyHit ? enemyHit.dist : worldHit ? worldHit.dist : reach.range);
 
+    let ended = ENDED.air;
     if (planeHit) {
+      ended = ENDED.plane;
       ctx.planes.down(planeHit.plane);
       ctx.hud?.markHit('kill');
       ctx.audio?.hitmark(false);
@@ -528,7 +537,9 @@ export class Gun extends WeaponBase {
         point: enemyHit.point, dir: _dir, part: enemyHit.part, crit: enemyHit.part === 'head',
       });
       _end.copy(enemyHit.point);
+      ended = ENDED.figure;
     } else if (worldHit) {
+      ended = ENDED.desk;
       ctx.effects.impact(worldHit.point, worldHit.normal, INK.PEN, worldHit.box.mover);
       if (worldHit.box.mover) ctx.level.toys?.hit(worldHit.box, worldHit.point, _dir, lethality.damage * IMPULSE);
       ctx.audio?.impact();
@@ -538,6 +549,7 @@ export class Gun extends WeaponBase {
     }
 
     ctx.effects.tracer(from, _end, { width: cosmetics.tracerWidth, ink: INK.ORANGE });
+    return ended;
   }
 }
 
@@ -746,6 +758,7 @@ export class Katana extends WeaponBase {
     ctx.effects.kick(0.5);
     ctx.effects.stop(0.06, 0.25);
     ctx.audio?.swing();
+    ctx.tell?.swing();
     this.ctx.hud?.message('BLADE');
   }
 
@@ -757,6 +770,7 @@ export class Katana extends WeaponBase {
     this.combo = (this.combo + 1) % 3;
     this.cooldown = this.swingTime * 0.8;
     this.ctx.audio?.swing();
+    this.ctx.tell?.swing();
   }
 
   /**

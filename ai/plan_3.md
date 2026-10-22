@@ -65,8 +65,9 @@ Each of the four complaints has its own cause.
   - both upper arms come forward and up, so the hands meet in front of the chest: the right hand
     on the grip, the left reaching toward the barrel;
   - the gun points the way the figure faces.
-- **The grip's orientation is set, not inherited.** `pose()` takes an optional `pitch`, which is 0
-  for enemies. The grip's world orientation is set to "level along the facing, tilted by pitch".
+- **The grip's orientation is set, not inherited.** `pose()` takes an optional `pitch`. Enemies
+  aim it at their target (`pitchTo`); a guest's page knows the target only when it is its own
+  player. The grip's world orientation is set to "level along the facing, tilted by pitch".
   It is worked out from the chain above it (chest, upper arm, forearm), all of which `pose()`
   itself has just set. So it is exact whatever the arm angles turn out to be: the arms can be
   tuned for looks without moving the barrel.
@@ -75,7 +76,8 @@ Each of the four complaints has its own cause.
 - **The `lean` sign is flipped,** with the head's counter-tilt that goes with it:
   - walking and charging figures lean forwards;
   - staggered ones reel backwards, as the comments say;
-  - `crew.js`'s crouch bends forwards (−0.35).
+  - `crew.js`'s crouch bends forwards (−0.35);
+  - the wind-up leans back, then forward into the cut. It had the same mistake.
 - **Enemies change with it.** Every enemy now points its gun at you while it aims, which is a tell
   you can read. Their hit volumes ride the joints, so they follow the arms.
 - **Checks:**
@@ -97,8 +99,9 @@ Each of the four complaints has its own cause.
 
 #### 1.2 The gun they hold (`net/crew.js`)
 
-- **Presence gets `w`:** the held slot, 0 to 4, in `game.weapons`' order (rifle, shotgun, sniper,
-  katana, staple gun). It changes only on a swap, so it costs nothing between swaps.
+- **Presence gets `w`:** the held weapon's key (`rifle`, `shotgun`, `sniper`, `katana`,
+  `stapler`), so the order of `game.weapons` does not matter. It changes only on a swap, so it
+  costs nothing between swaps.
 - **A friend's figure carries all five props** from the start, built by the rig's own `addProp`
   (`rifle`, `shotgun`, `sniper`, `katana`, and `staples` for the staple gun). Only the one in
   `w` is shown, and a hidden mesh is not drawn. `buildFigure` takes a list of props for this;
@@ -129,7 +132,7 @@ Each of the four complaints has its own cause.
   | event | bytes |
   |---|---|
   | a shot: the gun, then each pellet's end point (three `pos`) and what it hit (air, desk, figure, plane) | 2 + 7 per pellet |
-  | a katana swing: which way | 2 |
+  | a katana slash | 1 |
   | a grenade thrown: where from, and its velocity | 1 + 12 |
 
   A rifle held down is ten one-pellet shots a second, about 100 B/s. A shotgun is 58 B a pump.
@@ -237,11 +240,12 @@ both.
   - They sit 8 px apart, 10 px from the top and 14 px from the right.
   - In touch mode the WAVE readout (`.ir-top-r`) and the kill feed move down by one row, to sit
     under them.
-- **The bottom right:** INK in the corner as now, at 92 px, with UP, JET, DUCK and BLAST on an arc
-  round it, each 64 px.
-  - The arc's radius is about 140 px, so neighbours have about 8 px between them.
-  - The whole cluster is about 230 px tall, under 60% of a landscape phone's height. Today it is
-    320 px.
+- **The bottom right:** INK in the corner as now, at 92 px, with DUCK, UP, JET and BLAST on an arc
+  round it, each 60 px.
+  - The arc's radius is 118 px, from straight left to 80°, so neighbours have about 8 px between
+    them. Four 64 px buttons would need a 140 px radius.
+  - The whole cluster is 208 × 202 px, about half a landscape phone's height. Today it is
+    320 px tall.
   - JET sits next to UP, because you jump and then fly.
 - **The weapon readout** (`.ir-br`) never sits under a button:
   - **in landscape,** it moves to the left of the cluster, at the bottom;

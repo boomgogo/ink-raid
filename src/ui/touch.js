@@ -3,20 +3,64 @@
 // The project spec requires entry level phones and touch devices. The layout is the one that works on a phone
 // without a tutorial: left thumb drives a floating stick that appears wherever
 // you first press, right thumb is a look-pad anywhere on the right half, and a
-// short tap on the right half is a shot. Holding fire is its own button, under
-// the right thumb's natural arc with the rest.
+// short tap on the right half is a shot. Holding fire is its own button, INK,
+// in the bottom-right corner, with what else a fight needs on an arc round it.
 //
 // It writes the same named-action state the keyboard uses, and its own trigger
 // flag (`input.fireBy.touch`), so nothing downstream knows or cares which device
 // is driving — and a mouse or pad on the same machine keeps working alongside.
 
-const BTNS = [
-  { id: 'jump', label: 'UP', x: -88, y: -190, r: 40 },
-  { id: 'crouch', label: 'DUCK', x: -160, y: -112, r: 36 },
-  { id: 'jet', label: 'JET', x: -30, y: -112, r: 36 },
-  { id: 'reload', label: 'LOAD', x: -160, y: -258, r: 32 },
-  { id: 'grenade', label: 'BLAST', x: -30, y: -258, r: 32 },
+// Where the buttons are, in CSS px from the screen's edges.
+//
+// The right thumb rests on INK. DUCK, UP, JET and BLAST sit on an arc round it,
+// evenly spaced, so none is a stretch past another; JET is next to UP, as you
+// jump and then fly. The ones pressed now and then (LOAD, NEXT, WRAP) are a row
+// of small ones along the top edge, where they take nothing from the look pad.
+// All eight were once in the bottom-right corner, and in a landscape phone they
+// filled 80% of its height and sat on the weapon's name and slot list.
+//
+// The left thumb has the stick, and a second INK at the top left that only holds
+// the trigger: the stick and the right INK walk and shoot, the left INK and the
+// look pad aim and shoot.
+const INK_AT = { right: 14, bottom: 10, size: 92 };
+// From INK's centre: 180 degrees is straight left, 90 straight up.
+const ARC = { radius: 118, size: 60, from: 180, to: 80 };
+const ON_ARC = [
+  { a: 'crouch', label: 'DUCK' },
+  { a: 'jump', label: 'UP' },
+  { a: 'jet', label: 'JET' },
+  { a: 'grenade', label: 'BLAST' },
 ];
+// From the top-right corner leftwards, at the 44 px floor tools/touch.mjs checks.
+const ROW = { right: 14, top: 10, size: 44, gap: 8 };
+const ON_ROW = [
+  { a: 'reload', label: 'LOAD' },
+  { swap: true, label: 'NEXT' },
+  { a: 'heal', label: 'WRAP', cls: 'theal' },      // only while you carry a bandage
+];
+// Under the score (hud.css moves the blade gauge clear of it).
+const LEFT_INK = { left: 16, top: 84, size: 76 };
+
+const px = (o) => Object.entries(o).map(([k, v]) => `${k}:${Math.round(v)}px`).join(';');
+const square = (size) => ({ width: size, height: size });
+
+function arcAt(i) {
+  const deg = ARC.from + ((ARC.to - ARC.from) * i) / (ON_ARC.length - 1);
+  const t = (deg * Math.PI) / 180;
+  const half = INK_AT.size / 2, s = ARC.size / 2;
+  return {
+    right: INK_AT.right + half - Math.cos(t) * ARC.radius - s,
+    bottom: INK_AT.bottom + half + Math.sin(t) * ARC.radius - s,
+    ...square(ARC.size),
+  };
+}
+
+const rowAt = (i) => ({ right: ROW.right + i * (ROW.size + ROW.gap), top: ROW.top, ...square(ROW.size) });
+
+function button(b, at, small = false) {
+  const what = b.swap ? 'data-swap="1"' : `data-a="${b.a}"`;
+  return `<button class="tbtn${small ? ' tsmall' : ''}${b.cls ? ` ${b.cls}` : ''}" ${what} style="${px(at)}">${b.label}</button>`;
+}
 
 // Look speed, in mouse pixels per screen pixel of thumb travel.
 const LOOK_GAIN = 1.6;
@@ -41,11 +85,10 @@ export class TouchControls {
     this.el.className = 'touch';
     this.el.innerHTML = `
       <div class="tstick" id="tStick"><i></i></div>
-      ${BTNS.map((b) => `<button class="tbtn" data-a="${b.id}"
-        style="right:${-b.x}px;bottom:${-b.y}px;width:${b.r * 2}px;height:${b.r * 2}px">${b.label}</button>`).join('')}
-      <button class="tbtn tfire" data-fire="1">INK</button>
-      <button class="tbtn tswap" data-swap="1">NEXT</button>
-      <button class="tbtn theal" data-a="heal">WRAP</button>
+      <button class="tbtn tfire" data-fire="aim" style="${px({ right: INK_AT.right, bottom: INK_AT.bottom, ...square(INK_AT.size) })}">INK</button>
+      <button class="tbtn tfire" data-fire="hold" style="${px({ left: LEFT_INK.left, top: LEFT_INK.top, ...square(LEFT_INK.size) })}">INK</button>
+      ${ON_ARC.map((b, i) => button(b, arcAt(i))).join('')}
+      ${ON_ROW.map((b, i) => button(b, rowAt(i), true)).join('')}
     `;
     root.appendChild(this.el);
     this.stick = this.el.querySelector('#tStick');
@@ -53,10 +96,11 @@ export class TouchControls {
 
     this.moveId = null;
     this.lookId = null;
-    this.fireId = null;
+    // Each INK: the finger on it, and where it last was. The right one aims as
+    // it is dragged; the left one only holds the trigger.
+    this.triggers = { aim: { id: null, x: 0, y: 0 }, hold: { id: null, x: 0, y: 0 } };
     this.origin = { x: 0, y: 0 };
     this.lookLast = { x: 0, y: 0 };
-    this.fireLast = { x: 0, y: 0 };
     this.lookMoved = 0;
     this.lookStart = 0;
     this.fireUntil = 0;
@@ -114,7 +158,7 @@ export class TouchControls {
     }
     this.input.fireBy.touch = false;
     this.fireUntil = 0;
-    this.moveId = this.lookId = this.fireId = null;
+    this.moveId = this.lookId = this.triggers.aim.id = this.triggers.hold.id = null;
     this.knob.style.transform = '';
     this.stick.classList.remove('on');
   }
@@ -122,28 +166,30 @@ export class TouchControls {
   _bind() {
     for (const btn of this.el.querySelectorAll('.tbtn')) {
       const act = btn.dataset.a;
-      const fire = !!btn.dataset.fire;
+      const fire = btn.dataset.fire;
       const press = (e) => {
         e.preventDefault();
         e.stopPropagation();
         if (btn.dataset.swap) { this.onSwap?.(); return; }
         btn.classList.add('down');
-        if (fire) { this._fireDown(e); return; }
+        if (fire) { this._fireDown(e, fire); return; }
         this.input.state[act] = true;
       };
       const release = (e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (fire && !this._fireUp(e)) return;
+        if (fire && !this._fireUp(e, fire)) return;
         if (act) this.input.state[act] = false;
         btn.classList.remove('down');
       };
       btn.addEventListener('touchstart', press, { passive: false });
       btn.addEventListener('touchend', release, { passive: false });
       btn.addEventListener('touchcancel', release, { passive: false });
-      // A drag that starts on FIRE aims as well: one thumb cannot hold the
-      // trigger on one spot and track a target somewhere else.
-      if (fire) btn.addEventListener('touchmove', (e) => { e.preventDefault(); this._fireMove(e); }, { passive: false });
+      // A drag that starts on the right INK aims as well: one thumb cannot hold
+      // the trigger on one spot and track a target somewhere else. A drag on the
+      // left one does nothing: the right thumb is turning.
+      if (fire === 'aim') btn.addEventListener('touchmove', (e) => { e.preventDefault(); this._fireMove(e); }, { passive: false });
+      else if (fire) btn.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
     }
 
     // A touchscreen laptop shows the layer when it is touched, and hides it
@@ -153,7 +199,7 @@ export class TouchControls {
     document.addEventListener('touchstart', () => this.enable(), { passive: true, capture: true });
     addEventListener('pointermove', (e) => {
       if (this.coarse || !this.enabled || e.pointerType !== 'mouse') return;
-      if (this.moveId !== null || this.lookId !== null || this.fireId !== null) return;
+      if (this.moveId !== null || this.lookId !== null || this.firing()) return;
       this.disable();
     }, { passive: true });
 
@@ -236,40 +282,46 @@ export class TouchControls {
     target.addEventListener('touchcancel', end, { passive: true });
   }
 
-  _fireDown(e) {
+  /** Is a finger on either INK? */
+  firing() { return this.triggers.aim.id !== null || this.triggers.hold.id !== null; }
+
+  _fireDown(e, which) {
     const t = e.changedTouches[0];
-    if (!t || this.fireId !== null) return;
-    this.fireId = t.identifier;
-    this.fireLast.x = t.clientX;
-    this.fireLast.y = t.clientY;
+    const trig = this.triggers[which];
+    if (!t || trig.id !== null) return;
+    trig.id = t.identifier;
+    trig.x = t.clientX;
+    trig.y = t.clientY;
     // a tap on FIRE shorter than a frame still gets its shot
     this.fireUntil = Math.max(this.fireUntil, performance.now() + PULSE_MS);
-    this.input.note('touch FIRE down');
+    this.input.note(`touch ${which === 'aim' ? '' : 'left '}FIRE down`);
   }
 
   _fireMove(e) {
+    const trig = this.triggers.aim;
     for (const t of e.changedTouches) {
-      if (t.identifier !== this.fireId) continue;
-      this.input.mouse.dx += (t.clientX - this.fireLast.x) * LOOK_GAIN;
-      this.input.mouse.dy += (t.clientY - this.fireLast.y) * LOOK_GAIN;
-      this.fireLast.x = t.clientX;
-      this.fireLast.y = t.clientY;
+      if (t.identifier !== trig.id) continue;
+      this.input.mouse.dx += (t.clientX - trig.x) * LOOK_GAIN;
+      this.input.mouse.dy += (t.clientY - trig.y) * LOOK_GAIN;
+      trig.x = t.clientX;
+      trig.y = t.clientY;
     }
   }
 
-  /** @returns {boolean} whether the finger that lifted was the one holding FIRE */
-  _fireUp(e) {
+  /** @returns {boolean} whether the finger that lifted was the one holding this INK */
+  _fireUp(e, which) {
+    const trig = this.triggers[which];
     for (const t of e.changedTouches) {
-      if (t.identifier !== this.fireId) continue;
-      this.fireId = null;
-      this.input.note('touch FIRE up');
+      if (t.identifier !== trig.id) continue;
+      trig.id = null;
+      this.input.note(`touch ${which === 'aim' ? '' : 'left '}FIRE up`);
       return true;
     }
     return false;
   }
 
   /**
-   * The touch layer's trigger: FIRE held, or the tail of a tap.
+   * The touch layer's trigger: either INK held, or the tail of a tap.
    *
    * This used to also fire whenever the look-pad touch had been down for more
    * than 260 ms, meant for "holding the right thumb still". Nothing checked
@@ -279,6 +331,6 @@ export class TouchControls {
    */
   update() {
     if (!this.enabled) { this.input.fireBy.touch = false; return; }
-    this.input.fireBy.touch = this.fireId !== null || performance.now() < this.fireUntil;
+    this.input.fireBy.touch = this.firing() || performance.now() < this.fireUntil;
   }
 }

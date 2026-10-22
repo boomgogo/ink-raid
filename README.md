@@ -51,7 +51,15 @@ Keyboard and mouse. The keys can't be rebound yet.
 - **Bandages:** H wraps one, if you have one.
 - **Pausing:** Esc.
 
-A gamepad works too, and on a touch screen the controls appear on screen.
+A gamepad works too, and on a touch screen the controls appear on screen:
+
+- **Left thumb:** a stick wherever you put it down; push it far to run.
+- **Right thumb:** drag anywhere on the right to look, and a quick tap there fires once. INK, in
+  the bottom-right corner, holds the trigger and aims as you drag it. DUCK, UP, JET and BLAST sit
+  round it.
+- **The second INK,** at the top left, only holds the trigger: your left thumb fires while your
+  right thumb aims.
+- **Along the top right:** LOAD, NEXT (the next weapon), and WRAP while you carry a bandage.
 
 ## Playing with friends
 
@@ -65,6 +73,8 @@ the invite link it gives. Everybody who opens the link is asked to join.
 - Down is out until the next wave starts. The run is over when everybody is down at once.
 - The desk does not stop for a pause, and there is no friendly fire.
 - If the host leaves, the next player carries on with the same figures and the same wave.
+- You see your friends with the gun they hold, aimed where they look. Their shots leave tracers and
+  marks on the desk, and you hear them. Their katana slashes and their grenades show too.
 
 Alone, the game asks no server anything: it loads p3p2's 2 KB entry and nothing more.
 

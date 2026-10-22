@@ -38,6 +38,8 @@ export const GRENADE = {
 
 const _v = new THREE.Vector3();
 const _d = new THREE.Vector3();
+/** How far off a friend's blast is still heard, metres: as far as the figures' own shots are. */
+const HEARD = 60;
 
 export class Grenades {
   constructor(ctx, player) {
@@ -48,6 +50,8 @@ export class Grenades {
     this.held = false;
     this.restock = 0;
     this.live = [];
+    // a friend's, on their way (net/crew.js): drawn, and harmless
+    this.shown = [];
 
     const geo = new THREE.SphereGeometry(0.18, 8, 6);
     this.mesh = new THREE.InstancedMesh(geo, surface({ ink: INK.BLACK, look: LOOK.SOLID }), 8);
@@ -74,9 +78,27 @@ export class Grenades {
       this.charge = 0;
     }
 
-    const p = this.player;
-    for (let i = this.live.length - 1; i >= 0; i--) {
-      const g = this.live[i];
+    this.fly(this.live, dt, false);
+    this.place();
+  }
+
+  /**
+   * A friend's grenade (net/crew.js): it flies and goes off here as it does on their page, and is
+   * only drawn. Their page did the real blast, and sent what it hit to whoever runs the figures.
+   */
+  show(pos, vel) {
+    this.shown.push({ pos, vel, fuse: GRENADE.fuse });
+  }
+
+  /** In a room, every frame, whatever this page is doing: the friends' grenades. */
+  tickShown(dt) {
+    this.fly(this.shown, dt, true);
+    this.place();
+  }
+
+  fly(list, dt, shown) {
+    for (let i = list.length - 1; i >= 0; i--) {
+      const g = list[i];
       g.fuse -= dt;
       g.vel.y -= 32 * dt;
       _v.copy(g.vel).multiplyScalar(dt);
@@ -93,13 +115,22 @@ export class Grenades {
           g.pos.add(_v);
         }
       }
-      if (g.pos.y < this.ctx.level.killY) { this.live.splice(i, 1); continue; }
-      if (g.fuse <= 0) { this.explode(g.pos); this.live.splice(i, 1); }
+      if (g.pos.y < this.ctx.level.killY) { list.splice(i, 1); continue; }
+      if (g.fuse <= 0) {
+        if (shown) this.blot(g.pos);
+        else this.explode(g.pos);
+        list.splice(i, 1);
+      }
     }
+  }
 
-    const n = Math.min(this.live.length, 8);
+  /** Eight on the desk at most, yours first. */
+  place() {
+    const mine = this.live.length;
+    const n = Math.min(mine + this.shown.length, 8);
     for (let i = 0; i < n; i++) {
-      this._m.makeTranslation(this.live[i].pos.x, this.live[i].pos.y, this.live[i].pos.z);
+      const g = i < mine ? this.live[i] : this.shown[i - mine];
+      this._m.makeTranslation(g.pos.x, g.pos.y, g.pos.z);
       this.mesh.setMatrixAt(i, this._m);
     }
     this.mesh.count = n;
@@ -117,23 +148,36 @@ export class Grenades {
       vel: _d.clone().multiplyScalar(speed).add(new THREE.Vector3(0, 2.6, 0)).add(p.body.vel.clone().multiplyScalar(0.4)),
       fuse: GRENADE.fuse,
     });
+    const g = this.live[this.live.length - 1];
+    this.ctx.tell?.threw(g.pos, g.vel);
     this.ctx.audio?.throwNade();
   }
 
-  explode(pos) {
+  /** What a blast leaves to see and hear: the burst and the scorch. `near`: how loud, 0 to 1. */
+  mark(pos, near = 1) {
     const ctx = this.ctx;
     ctx.effects.burst(pos, new THREE.Vector3(0, 1, 0), 26, {
       speed: 16, spread: 1.4, size: 0.09, life: 0.55, ink: INK.BLACK, gravity: 14, drag: 2.2, stretch: 0.16,
     });
+    ctx.audio?.explosion(near);
+    // a scorch mark, so the page remembers
+    ctx.effects.decal(pos.clone().setY(pos.y + 0.02), new THREE.Vector3(0, 1, 0), { size: 3.5, ink: INK.BLACK });
+  }
+
+  /** A friend's grenade going off: seen and heard, and nothing more. */
+  blot(pos) {
+    this.mark(pos, Math.max(0, 1 - pos.distanceTo(this.ctx.camera.position) / HEARD));
+  }
+
+  explode(pos) {
+    const ctx = this.ctx;
+    this.mark(pos);
     ctx.effects.kick(0.8);
     ctx.effects.stop(0.05, 0.2);
-    ctx.audio?.explosion();
     // Heard across the desk, but a bang is not where YOU are: what hears it
     // goes to look (whatever it hurts is hunting you anyway).
     ctx.enemies?.noise(pos, GRENADE.heard, 'bang');
 
-    // a scorch mark, so the page remembers
-    ctx.effects.decal(pos.clone().setY(pos.y + 0.02), new THREE.Vector3(0, 1, 0), { size: 3.5, ink: INK.BLACK });
     // and the toys in reach get shoved, and a paper plane in it comes down
     ctx.level.toys?.blast(pos, GRENADE.blast.radius * GRENADE.blast.toyReach, GRENADE.blast.damage * GRENADE.blast.toyFrac);
     ctx.planes?.blast(pos, GRENADE.blast.radius);

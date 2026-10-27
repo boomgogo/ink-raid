@@ -1,0 +1,8 @@
+
+1. Update p3p2 version to v0.2.0
+    - Is there a reason why the p3p2 client logo and box is not used as it is?
+        - If not, can you just use what comes with the p3p2 client?
+        - keep the "friends" button in the main menu, which should open the same p3p2 client box
+            - this button should be labelled as "play with friends"
+2. Update the link back from maize.live to muon.day
+

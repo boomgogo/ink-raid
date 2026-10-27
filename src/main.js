@@ -41,12 +41,14 @@ const game = headless ? null : new Game(ctx);
 
 // Friends on the same desk, through a p3p2 server (net/room.js). The library's entry is under
 // 2 KB; the rest loads when a room is opened. An ordinary visit asks no server anything. The 👥
-// panel has no button of its own here, as every corner of the HUD is taken: FRIENDS on the title,
-// pause and death screens opens it. Enter is the game's, not the chat's.
+// button is p3p2's own, in its corner, on the title, pause and death screens; while a run is
+// played every corner is the HUD's, and it is hidden (`ir-playing`, ui/screens.js). PLAY WITH
+// FRIENDS on the title opens the same panel. No chat key: in a run the panel is hidden, and chat
+// would open behind it.
 if (game) {
   const p3p2 = new P3P2({
     game: { id: 'ink-raid', version: __BUILD__ },
-    ui: { button: false, chatKey: false },
+    ui: { chatKey: false },
   });
   game.net = new Net(game, p3p2);
   game.roomChanged();

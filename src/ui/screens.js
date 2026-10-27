@@ -15,7 +15,7 @@ const esc = (s) => String(s).replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;
 // are more: at the foot of the title and pause screens. The boot splash (index.html) has the same.
 const LINKS = `<p class="ir-links">
   <a href="https://github.com/boomgogo/ink-raid" target="_blank" rel="noopener">fork me on GitHub</a>
-  &middot; <a href="https://maize.live" target="_blank" rel="noopener">more games on Maize.Live</a>
+  &middot; <a href="https://muon.day" target="_blank" rel="noopener">more games on muon.day</a>
 </p>`;
 // look speed as a multiplier of the default: 100 reads 1.00×
 const lookSpeed = (v) => `${(v / 100).toFixed(2)}×`;
@@ -36,7 +36,11 @@ export class Screens {
 
   get visible() { return this.node.classList.contains('ir-on'); }
 
+  // `ir-playing` on <html> while no screen is up, which is while a run is played: p3p2's 👥
+  // button is hidden then (hud.css), as every corner is the HUD's. Only a screen going away sets
+  // it, so the panel's own "Join?", which comes up as the page loads, is never hidden.
   hide() {
+    document.documentElement.classList.add('ir-playing');
     this.node.classList.remove('ir-on');
     this.node.innerHTML = '';
     this._onBackdrop = null;
@@ -44,6 +48,7 @@ export class Screens {
 
   _show(panelHtml, onBackdrop) {
     this._onShow?.();
+    document.documentElement.classList.remove('ir-playing');
     this._onBackdrop = onBackdrop;
     this.node.classList.add('ir-on');
     this.node.innerHTML = `<div class="ir-panel">${panelHtml}</div>`;
@@ -56,23 +61,16 @@ export class Screens {
   }
 
   /**
-   * FRIENDS: the 👥 panel, where a room is opened and friends are invited (net/room.js). Not
-   * there at all in a page without one.
-   * @param {{label:string, inRoom:boolean, onClick:Function} | null | undefined} f
+   * PLAY WITH FRIENDS, on the title: p3p2's 👥 panel, the same one its corner button opens, where
+   * friends are invited and where it says how to get a room (net/room.js). Not there at all in a
+   * page without one.
+   * @param {{label:string, onClick:Function} | null | undefined} f
    */
   _friends(panel, f) {
     if (!f) return;
     const b = el(`<button class="ir-leave ir-friends" data-a="friends">${quillButton('friends')}<span>${esc(f.label)}</span></button>`);
     b.addEventListener('click', (e) => { e.stopPropagation(); f.onClick(); });
-    const go = panel.querySelector('.ir-go');
-    panel.insertBefore(b, go);
-    // Where a room comes from, for whoever opens one: until this page is in a room, player 1
-    // needs to know there is somewhere to get one, or a server of their own.
-    if (f.inRoom) return;
-    const a = el(`<p class="ir-p3p2">to play with friends, get a room (or a server of your own) at
-      <a href="https://p3p2.me" target="_blank" rel="noopener">p3p2.me</a></p>`);
-    a.addEventListener('click', (e) => e.stopPropagation());
-    panel.insertBefore(a, go);
+    panel.insertBefore(b, panel.querySelector('.ir-go'));
   }
 
   /**
@@ -85,7 +83,7 @@ export class Screens {
    * @param {number} o.volume      0-100
    * @param {boolean} o.howtoOpen
    * @param {boolean} o.touch      true on a touch-primary device
-   * @param {{label:string, onClick:Function}} [o.friends]
+   * @param {{label:string, onClick:Function}} [o.friends]  PLAY WITH FRIENDS
    * @param {(key:string)=>void} o.onStart
    * @param {(key:'volume'|'music'|'sens'|'invert', value:any)=>void} o.onSetting
    * @param {(open:boolean)=>void} o.onHowto
@@ -173,7 +171,7 @@ export class Screens {
   }
 
   /**
-   * @param {{diffLabel:string, score:number, wave:number, shared?:boolean, friends?:object,
+   * @param {{diffLabel:string, score:number, wave:number, shared?:boolean,
    *          onMainMenu:Function, onBackdrop:Function}} o
    */
   pause(o) {
@@ -186,14 +184,13 @@ export class Screens {
       ${LINKS}
     `, o.onBackdrop);
     panel.querySelector('#btnMenu').addEventListener('click', () => o.onMainMenu());
-    this._friends(panel, o.friends);
   }
 
   /**
    * `crew`: with friends, everybody who was in the run, [name, kills] each, and `best` is null:
    * a run together is not a score of your own.
    * @param {{diffLabel:string, waves:number, kills:number, score:number, best:number|null,
-   *          crew?:[string, number][], friends?:object,
+   *          crew?:[string, number][],
    *          touch:boolean, onMainMenu:Function, onBackdrop:Function}} o
    */
   death(o) {
@@ -210,6 +207,5 @@ export class Screens {
       <p class="ir-go">${again}</p>
     `, o.onBackdrop);
     panel.querySelector('#btnMenu').addEventListener('click', () => o.onMainMenu());
-    this._friends(panel, o.friends);
   }
 }

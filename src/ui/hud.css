@@ -321,11 +321,14 @@
 /* the build (index.html places it): over the screens as well as the run */
 #hud .ir-version { z-index: 6; }
 
-/* With friends (net/): FRIENDS beside MAIN MENU, everybody's kills when a run is over, and each
-   friend's name over their head, in pen. */
-.ir-friends { margin-left: .4em; }
-.ir-p3p2 { margin: .5em 0 0; font-size: .82em; opacity: .85; }
-.ir-p3p2 a { color: inherit; text-decoration-thickness: 1px; text-underline-offset: .18em; }
+/* With friends (net/): PLAY WITH FRIENDS on the title, everybody's kills when a run is over, and
+   each friend's name over their head, in pen. p3p2's own 👥 button is in its own corner (top
+   right) on the screens, and hidden while a run is played, when every corner is the HUD's
+   (`ir-playing`, ui/screens.js). Behind a screen nothing of the run is drawn, so the corner is
+   free: the title and death screens hide the HUD themselves, the pause screen did not, and the
+   thumb buttons showed through all three, though a screen takes every touch. */
+.ir-playing p3p2-panel { display: none; }
+html:not(.ir-playing) :is(#irRun, .touch) { visibility: hidden; }
 .ir-crew b { margin-right: .2em; }
 .ir-tags { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .ir-tag {

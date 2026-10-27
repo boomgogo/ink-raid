@@ -64,9 +64,11 @@ A gamepad works too, and on a touch screen the controls appear on screen:
 ## Playing with friends
 
 Co-op goes through [p3p2](https://p3p2.me), a small server you can run yourself
-(<https://github.com/doublependu/p3p2>). Whoever has a p3p2 server makes a room for the game's URL
-in its portal, opens the game, presses FRIENDS on the title screen, pastes the room URL, and sends
-the invite link it gives. Everybody who opens the link is asked to join.
+(<https://github.com/doublependu/p3p2>). Whoever has a p3p2 server creates a room for the game's
+URL in its portal, then presses **Open** on the room's page, or sends its invite link. Everybody
+comes in through that link, the server's owner too, and is asked to join. In the game, p3p2's 👥
+button in the top right corner (on the title, pause and death screens) or PLAY WITH FRIENDS on the
+title opens p3p2's panel, with the invite link and a QR code to pass on.
 
 - PLAY starts a run for everybody in the room; whoever is on the title screen then gets JOIN.
 - Each player past the first adds half a wave. The host's page runs the figures for everyone.
@@ -79,7 +81,8 @@ the invite link it gives. Everybody who opens the link is asked to join.
 Alone, the game asks no server anything: it loads p3p2's 2 KB entry and nothing more.
 
 For a local server, run `npm run dev` in a p3p2 checkout (port 8080) and this game with
-`npm run dev -- --host`. Make a room in its portal for `http://<this machine's address>:5173/`.
+`npm run dev -- --host`. Create a room in its portal for `http://<this machine's address>:5173/`,
+and press **Open** on the room's page.
 
 ## Tests
 
@@ -95,9 +98,9 @@ the game pauses when its window loses focus.
 | `npm run collide` | what is drawn is what you hit, stand on and shoot |
 | `npm run reach` | every place on the map can be walked to, by you and by enemies |
 | `npm run toys` | the pendulum and the cradle move as physics says |
-| `npm run touch` | the touch controls |
+| `npm run touch` | the touch controls, and p3p2's 👥 button clear of everything on the title and pause screens |
 | `npm run perf` | load time and frame times on a throttled desktop and phone |
-| `npm run coop` | co-op in several browsers against a real p3p2 server: the same figures, hits, downs, the host leaving, a reload, a phone, frame times with friends. It starts a server from a p3p2 checkout (`P3P2_DIR`, default `~/Repos/p3p2`), or uses `P3P2_URL` and `P3P2_PASSWORD` |
+| `npm run coop` | co-op in several browsers against a real p3p2 server: the same figures, hits, downs, the host leaving, a reload, a phone, frame times with friends. It starts a server from a p3p2 0.2 checkout (`P3P2_DIR`, default `~/Repos/p3p2`), or uses `P3P2_URL` and `P3P2_PASSWORD` |
 | `npm run figures` | enemies stay easy to spot from 10 m to 60 m |
 | `npm run shots`, then `node tools/compare.mjs gate shots/stills/*.png` | the look of the page, as numbers |
 | `npm run distcheck` | the build ships the game and nothing else |

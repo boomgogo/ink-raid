@@ -127,7 +127,37 @@ check('touch layer enabled', shown, 'on a coarse pointer, before the run starts'
 // All eight buttons were once in the bottom-right corner. In a landscape phone
 // they filled 80% of its height, and sat on the weapon's name and slot list,
 // with every check here green: none of them was asked in landscape.
+//
+// p3p2's 👥 button is asked too: on the title and pause screens it must be on the screen
+// and clear of everything that shows there, the sheet's controls and the HUD and buttons
+// still drawn behind the pause sheet; in a run it must not be there at all.
 const PHONES = [[390, 844], [844, 390], [360, 740], [740, 360]];
+// What p3p2's button sits on, if anything: null when it is not drawn.
+const pillOn = (lp) => lp.evaluate(() => {
+  const pill = document.querySelector('p3p2-panel');
+  const p = pill?.getBoundingClientRect();
+  if (!p || !p.width) return null;
+  const shown = (el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden' && +getComputedStyle(el).opacity > 0;
+  const boxes = [];
+  for (const el of document.querySelectorAll('.ir-panel :is(button, input, summary, a, label), .touch .tbtn')) {
+    if (shown(el) && getComputedStyle(el).display !== 'none') boxes.push({ name: el.textContent.trim().slice(0, 16) || el.tagName, r: el.getBoundingClientRect() });
+  }
+  for (const root of document.querySelectorAll('.ir-top-l, .ir-top-r, .ir-feed, .ir-bl, .ir-br, .ir-boss.ir-on, #hud .ir-version')) {
+    if (!shown(root)) continue;
+    const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      if (!n.textContent.trim() || !shown(n.parentElement)) continue;
+      const range = document.createRange();
+      range.selectNodeContents(n);
+      for (const r of range.getClientRects()) if (r.width > 0) boxes.push({ name: n.textContent.trim().slice(0, 16), r });
+    }
+  }
+  const on = boxes.filter(({ r }) => r.left < p.right && r.right > p.left && r.top < p.bottom && r.bottom > p.top).map((b) => b.name);
+  const off = p.left < 0 || p.top < 0 || p.right > innerWidth || p.bottom > innerHeight;
+  return { on, off, at: `${Math.round(p.width)}x${Math.round(p.height)} at (${Math.round(p.left)}, ${Math.round(p.top)})`, n: boxes.length };
+});
+const pillCheck = (name, r) => check(name, !!r && !r.off && r.on.length === 0,
+  !r ? 'not drawn' : r.off ? `off the screen, ${r.at}` : r.on.length ? `on ${r.on.slice(0, 4).map((s) => `"${s}"`).join(', ')}` : `${r.at}, clear of ${r.n} things`);
 for (const [w, h] of PHONES) {
   const lctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
   const lp = await lctx.newPage();
@@ -135,6 +165,7 @@ for (const [w, h] of PHONES) {
   await lp.goto(URL_BASE, { waitUntil: 'load' });
   await lp.waitForFunction(() => window.__inkReady === true, { timeout: 30000 });
   await sleep(500);
+  pillCheck(`${w}x${h}: 👥 clear on the title`, await pillOn(lp));
   await lp.evaluate(() => {
     const G = window.__ink.game;
     G.startRun();
@@ -185,6 +216,12 @@ for (const [w, h] of PHONES) {
   check(`${at}: buttons on the screen`, r.off.length === 0, r.off.length ? r.off.join(', ') : `all ${r.n} inside ${at}`);
   check(`${at}: no button on another`, r.stacked.length === 0, r.stacked.join(', ') || 'none touch');
   check(`${at}: no button on a readout`, r.covers.length === 0, r.covers.slice(0, 4).join(', ') || `${r.readouts} bits of the HUD all clear`);
+  const inRun = await pillOn(lp);
+  check(`${at}: 👥 hidden in a run`, inRun === null, inRun ? `drawn, ${inRun.at}` : 'not drawn');
+  await lp.evaluate(() => window.__ink.game.pause());
+  await sleep(300);
+  pillCheck(`${at}: 👥 clear on the pause`, await pillOn(lp));
+  await lp.screenshot({ path: path.join(root, 'shots', 'stills', `touch-${w}x${h}-pause.png`), scale: 'css' });
   await lctx.close();
 }
 

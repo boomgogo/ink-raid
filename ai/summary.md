@@ -64,9 +64,16 @@ paper.
 - **The jetpack** (`entities/jetpack.js`, `JET`) replaced the grapple, on the same keys. Hold to fly;
   the thrust is throttled to a 9 m/s climb, and a tank lasts 2.1 s: about 17 m up from standing, a
   metre over the highest place. It refuels whenever it is not burning, in the air too.
-- **Co-op** through a p3p2 server (`net/`, from the fork at `~/Repos/p3p2_test_repos/ink-raid`):
-  - FRIENDS on the title, pause and death screens opens p3p2's panel, with a link to p3p2.me
-    beside it until the page is in a room;
+- **Co-op** through a p3p2 server (`net/`, `@p3p2/client` 0.2, from the fork at
+  `~/Repos/p3p2_test_repos/ink-raid`):
+  - everybody comes into a room through its invite link, the server's owner too: there is no room
+    URL to paste since p3p2 0.2;
+  - p3p2's own 👥 button sits in its corner (top right) on the title, pause and death screens, and
+    is hidden while a run is played, when every corner is the HUD's (`ir-playing` on `<html>`,
+    set by `ui/screens.js`). Behind a screen nothing of the run is drawn, the pause screen
+    included, nor the thumb buttons, which a screen covers anyway;
+  - PLAY WITH FRIENDS on the title opens the same panel. The panel itself says where to get a room
+    (p3p2.me);
   - the run is the room's: PLAY starts it for everybody, the others get JOIN;
   - each player past the first adds half a wave (`CREW` in `core/waves.js`);
   - down is out until the next wave; the run is over when everybody here is down at once;
@@ -80,7 +87,9 @@ paper.
     It is for show only, since hits still go to the host as `hit`. Their shots and blasts are heard
     within 60 m;
   - a friend is drawn with no coasting (`Smooth`, `coast: 0`). A page stops sending once its
-    player stands still, and coasting carried a landing on through the floor;
+    player stands still, and coasting carried a landing on through the floor. The host's figures
+    and planes coast 250 ms over a late report (`COAST` in `net/horde.js`), as p3p2 0.1 did by
+    default;
   - alone, the page loads p3p2's 2 KB entry and asks no server anything.
 - **Touch** (`ui/touch.js`):
   - INK sits in the bottom-right corner, with DUCK, UP, JET and BLAST on an arc round it;
@@ -88,18 +97,20 @@ paper.
     moves down under them;
   - a second INK at the top left only holds the trigger, so the left thumb fires while the right
     thumb aims;
-  - `npm run touch` checks the layout on four phones, upright and on their side.
+  - `npm run touch` checks the layout on four phones, upright and on their side, and that p3p2's
+    button is clear of everything on the title and pause screens and gone in a run.
 - **The build** shows in the bottom-left corner as `v.` and four characters of its commit
   (`vite.config.js`), on the boot splash too. p3p2's game version is 12 characters of the commit,
   plus the build time when the tree is dirty.
-- **Links** to the GitHub repository and to Maize.Live sit on the boot splash and the title and
+- **Links** to the GitHub repository and to muon.day sit on the boot splash and the title and
   pause screens.
 
 ## Tools
 
 See the table in `README.md`. The browser tools need Chrome and `npm run preview` on port 4173,
 and must run one at a time. `tools/coop.mjs` (`npm run coop`) also needs a p3p2 checkout at
-`~/Repos/p3p2` (or `P3P2_DIR`), whose server it starts; it drives five or six Chrome windows into
+v0.2.0 or later, at `~/Repos/p3p2` (or `P3P2_DIR`), whose server it starts. On the development
+machine that is `/run/media/p1/DRIVE2/p1/Repos/p3p2`; it drives five or six Chrome windows into
 one room. `compare.mjs` holds the style contract (paper, ink, dot grid, ink load)
 and the figure-legibility band. Both are measured from this build.
 

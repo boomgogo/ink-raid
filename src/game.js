@@ -376,7 +376,7 @@ export class Game {
     this.pausedAt = performance.now();
     this.hud.screens.pause({
       diffLabel: difficulty.label, score: this.score, wave: this.waves.wave,
-      shared: !!this.net?.inRoom(), friends: this.friendsButton(),
+      shared: !!this.net?.inRoom(),
       onMainMenu: () => this.quitToMenu(),
       onBackdrop: () => this.resume(),
     });
@@ -450,12 +450,15 @@ export class Game {
   /** In a run: playing it, paused in it, or down in it. */
   inRun() { return this.state === 'playing' || this.state === 'paused' || this.state === 'down'; }
 
-  /** FRIENDS on a screen: the 👥 panel, to open a room, invite, or see who is here. */
+  /**
+   * PLAY WITH FRIENDS on the title: p3p2's 👥 panel, to get into a room, invite, or see who is
+   * here. The pause and death screens have p3p2's own button in the corner for it.
+   */
   friendsButton() {
     const net = this.net;
     if (!net) return null;
     const n = net.room ? net.room.members.length : 0;
-    return { label: n > 1 ? `FRIENDS · ${n} here` : 'FRIENDS', inRoom: !!net.room, onClick: () => net.open() };
+    return { label: n > 1 ? `PLAY WITH FRIENDS · ${n} here` : 'PLAY WITH FRIENDS', onClick: () => net.open() };
   }
 
   /** A wave starts: whoever is down is back at the start, with full health. */
@@ -477,7 +480,7 @@ export class Game {
     this.hud.setGameVisible(false);
     this.hud.screens.death({
       diffLabel: DIFFICULTIES[run.d].label, waves: run.waves, kills: this.kills, score: this.score,
-      best: null, crew: run.kills, touch: this.touch.enabled, friends: this.friendsButton(),
+      best: null, crew: run.kills, touch: this.touch.enabled,
       onMainMenu: () => this.quitToMenu(),
       onBackdrop: () => this.startRun(),
     });

@@ -10,9 +10,9 @@
 //   P3P2_URL=http://127.0.0.1:8080 P3P2_PASSWORD=... npm run coop
 //
 // A room is made in the server's portal for this game's URL, as its owner
-// would, and the pages go in the way players do: FRIENDS, the room URL, the
-// invite link, Join. What is asked of each page after that is read off
-// `window.__ink.net.status()` and the game's own objects.
+// would, and the pages go in the way players do (p3p2 0.2): the room's invite
+// link, Join, the first one in being the host. What is asked of each page
+// after that is read off `window.__ink.net.status()` and the game's own objects.
 //
 // The pages are windows of one Chrome. Chrome slows windows that are covered
 // or in the background, and the pages would then be "away" to the room, so
@@ -87,32 +87,33 @@ const st = (p) => p.page.evaluate(() => window.__ink.net.status());
 const run = (p, fn, arg) => p.page.evaluate(fn, arg);
 const selfId = (p) => run(p, () => window.__ink.net.room?.self.id);
 
-/** The owner's side: a room for this game, made in the portal. */
+/**
+ * The owner's side: a room for this game, made in the portal, and its invite link, which is how
+ * everybody comes in, the owner too (as p3p2's own e2e/tests/helpers.ts `createRoom` does it).
+ */
 async function makeRoom(name) {
   const ctx = await browser.newContext();
   const portal = await ctx.newPage();
-  await portal.goto(`${SERVER}/`);
+  // not the server's address: a room on its front page makes that the front page
+  await portal.goto(`${SERVER}/login`);
   await portal.getByLabel('Password').fill(PASSWORD);
   await portal.getByRole('button', { name: 'Log in' }).click();
   await portal.getByLabel('Game URL').fill(GAME);
   await portal.getByLabel('Room name').fill(name);
   await portal.getByRole('button', { name: 'Create room' }).click();
-  const url = await portal.getByLabel('Room URL').inputValue();
+  await portal.getByRole('heading', { name }).waitFor({ timeout: 10000 });
+  const link = portal.getByLabel('Invite link', { exact: true });
+  if (!(await link.isVisible())) await portal.getByRole('button', { name: 'Create invite' }).click();
+  const invite = await link.inputValue();
   await ctx.close();
-  return url;
-}
-
-/** FRIENDS, the room URL, and the invite link to send. */
-async function hostRoom(p, roomUrl) {
-  await p.page.click('[data-a="friends"]');
-  await p.page.getByLabel('Your name').fill(p.name);
-  await p.page.getByLabel('Room URL').fill(roomUrl);
-  await p.page.getByRole('status').filter({ hasText: '✓' }).waitFor({ timeout: 10000 });
-  await p.page.getByRole('button', { name: 'Create a multiplayer game room for my friends' }).click();
-  const invite = await p.page.getByLabel('Invite link', { exact: true }).inputValue();
-  await p.page.keyboard.press('Escape');
   return invite;
 }
+
+/** p3p2's 👥 button: its box, or null while it is not drawn. */
+const pill = (p) => run(p, () => {
+  const r = document.querySelector('p3p2-panel')?.getBoundingClientRect();
+  return r && r.width ? { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) } : null;
+});
 
 /** Opens an invite link and says yes. */
 async function join(name, invite, o = {}) {
@@ -184,13 +185,20 @@ const summarise = (f) => {
   const core = loaded.filter((u) => /p3p2-(core|panel)/.test(u));
   check('alone: no server asked anything', away.length === 0, away.length ? away.slice(0, 3).join(' ') : 'nothing but the game\'s own files');
   check('alone: the room code stays unloaded', core.length === 0, core.length ? core.join(' ') : 'p3p2-core and the panel never fetched');
+  // p3p2's own button, drawn by its small entry: the rest loads when it is pressed
+  const box = await pill(p);
+  await p.page.getByRole('button', { name: 'Multiplayer' }).click();
+  const card = p.page.getByRole('dialog', { name: 'Multiplayer' });
+  const opened = await card.waitFor({ timeout: 5000 }).then(() => true, () => false);
+  const says = opened ? await card.innerText() : '';
+  check('alone: p3p2\'s 👥 on the title opens its panel', !!box && opened && /invite link/i.test(says),
+    `${box ? `${box.w}x${box.h} at (${box.x}, ${box.y})` : 'no button'}; ${opened ? `"${says.split('\n').filter(Boolean).slice(1, 3).join(' ')}"` : 'no panel'}`);
   await p.ctx.close();
 }
 
 // --- two players -------------------------------------------------------------------
-const roomUrl = await makeRoom('the desk');
-const A = await open('Ann', { w: 640, h: 400 });
-const invite = await hostRoom(A, roomUrl);
+const invite = await makeRoom('the desk');
+const A = await join('Ann', invite, { w: 640, h: 400 });
 const B = await join('Bo', invite, { w: 480, h: 300 });
 const aId = await selfId(A), bId = await selfId(B);
 {
@@ -773,7 +781,7 @@ await sleep(2000);
   const vp = F.page.viewportSize();
   const fits = !!box && box.x >= -1 && box.y >= -1 && box.x + box.width <= vp.width + 1 && box.y + box.height <= vp.height + 1;
   await F.page.screenshot({ path: 'shots/stills/coop-phone-panel.png' });
-  check('a phone: FRIENDS by touch, a panel that fits', fits,
+  check('a phone: PLAY WITH FRIENDS by touch, a panel that fits', fits,
     box ? `${Math.round(box.width)}x${Math.round(box.height)} at (${Math.round(box.x)}, ${Math.round(box.y)}) in ${vp.width}x${vp.height}` : 'no panel');
   await F.page.getByRole('button', { name: 'Close' }).tap().catch(() => {});
   // a run started by somebody else, and JOIN by touch
@@ -793,6 +801,17 @@ await sleep(2000);
   const after = await run(F, () => window.__ink.player.body.pos.toArray());
   const moved = Math.hypot(after[0] - before[0], after[2] - before[2]);
   check('a phone: JOIN by touch, and the stick walks', inRun && moved > 1, `in the run ${inRun}, walked ${moved.toFixed(1)} m`);
+  // p3p2's button: not there in a run, where every corner is the HUD's; back on the pause
+  // screen, which has no PLAY WITH FRIENDS of its own, and opening the same panel
+  const inRunBox = await pill(F);
+  await run(F, () => window.__ink.game.pause());
+  await sleep(300);
+  const pausedBox = await pill(F);
+  const ours = await F.page.locator('[data-a="friends"]').count();
+  await F.page.getByRole('button', { name: /^Multiplayer/ }).tap();
+  const again = await card.waitFor({ timeout: 5000 }).then(() => true, () => false);
+  check('a phone: 👥 hidden in a run, on the pause opens the panel', !inRunBox && !!pausedBox && !ours && again,
+    `in a run ${inRunBox ? 'drawn' : 'not drawn'}; paused ${pausedBox ? `${pausedBox.w}x${pausedBox.h} at (${pausedBox.x}, ${pausedBox.y})` : 'not drawn'}, PLAY WITH FRIENDS ${ours ? 'there' : 'not there'}, panel ${again ? 'opened' : 'not opened'}`);
   await F.ctx.close();
 }
 

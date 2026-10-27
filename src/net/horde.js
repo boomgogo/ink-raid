@@ -51,6 +51,12 @@ const REPORT_HZ = 10;
 const BATCH_SECONDS = 0.05;
 /** How far in the past a guest draws the horde, ms: two reports at ten a second, and the server. */
 const DELAY = 140;
+/**
+ * How long a figure or a plane carries on past a late report, ms. Figures and planes are reported
+ * all the time, so this only acts when one is late, and a moving figure that carries on hides the
+ * hitch better than one that freezes. 250 is what p3p2 0.1 did by default; 0.2's default is none.
+ */
+const COAST = 250;
 /** A guest's noise is told at most this often, seconds: a rifle fires ten times a second. */
 const NOISE_GAP = 0.25;
 
@@ -71,8 +77,8 @@ export class Horde {
     this.ctx = game.ctx;
     this.room = null;
     this.leading = false;
-    this.smooth = new Smooth({ delay: DELAY, angles: [3], jump: 8 });
-    this.planeSmooth = new Smooth({ delay: DELAY, quaternions: [3], jump: 20 });
+    this.smooth = new Smooth({ delay: DELAY, coast: COAST, angles: [3], jump: 8 });
+    this.planeSmooth = new Smooth({ delay: DELAY, coast: COAST, quaternions: [3], jump: 20 });
     this.reportT = 0;
     this.batchT = 0;
     this.seq = 0;
@@ -193,7 +199,7 @@ export class Horde {
     this.ctx.planes.follower = (dt) => this.drawPlanes(dt);
     this.ctx.planes.asked = (p) => this.askPlane(p);
     this.ctx.pickups.follow = true;
-    this.smooth = new Smooth({ delay: DELAY, angles: [3], jump: 8 });
+    this.smooth = new Smooth({ delay: DELAY, coast: COAST, angles: [3], jump: 8 });
   }
 
   unfollow() {

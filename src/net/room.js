@@ -55,7 +55,7 @@ export class Net {
 
   runOn() { return !!this.run?.on; }
 
-  /** The 👥 panel: paste a room URL, invite, see who is here. */
+  /** The 👥 panel: how to get into a room, the invite to pass on, who is here. */
   open() { this.p3p2.open(); }
 
   // ---- in and out of a room --------------------------------------------------------------
@@ -85,7 +85,9 @@ export class Net {
     );
 
     if (r.isHost && g.inRun()) {
-      // A run alone, opened to friends: it goes on, and is the room's now.
+      // A run alone, opened to friends: it goes on, and is the room's now. With p3p2 0.2 a room
+      // is only entered through an invite link, which loads the page afresh, so this is a reload
+      // back into the room whose `start()` came after PLAY had been pressed.
       this.knows = true;
       const id = (this.run?.id || 0) + 1;
       g.runId = id;

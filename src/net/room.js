@@ -250,7 +250,7 @@ export class Net {
     ctx.pickups.update(dt, playing ? ctx.player : null);
     ctx.planes.update(dt);
     this.horde.tick(dt);
-    this.crew.say(ctx.player, g.inRun() ? g.runId : 0, g.kills, g.weapon.key);
+    this.crew.say(ctx.player, g.inRun() ? g.runId : 0, g.kills, g.weapon.key, !!g.weapon.blocking);
     this.crew.flush(dt);
     this.crew.draw(dt);
     this.checkT -= dt;

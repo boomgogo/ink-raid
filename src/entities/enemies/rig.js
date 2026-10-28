@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { surface } from '../../render/surface.js';
 import { INK, LOOK } from '../../render/palette.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { buildProp } from '../weapons/models.js';
+import { buildProp, KATANA_MOVES, slashAt, slashBlade, slashHands, bladeTurn } from '../weapons/models.js';
 
 const box = (w, h, d, x, y, z) => new THREE.BoxGeometry(w, h, d).translate(x, y, z);
 const merged = (geos) => mergeGeometries(geos, false);
@@ -456,7 +456,8 @@ function layGun(J, pitch) {
 /**
  * Pose a figure. Everything is arithmetic on a phase — no clips, no blending.
  * `walk` is how much the legs should be moving, `t` a running phase, `pitch`
- * how far up (or down, below 0) it aims, in radians.
+ * how far up (or down, below 0) it aims, in radians. `blade`, for a friend
+ * with the katana out: `{ slash, guard }`, as holdBlade takes them.
  *
  * A figure faces −z: its eyes are there, and its yaw is the way it looks. A
  * positive turn about x brings a hanging limb forward and up, and tips the
@@ -467,6 +468,9 @@ function layGun(J, pitch) {
 export function pose(J, o) {
   const { t, walk, aim, lean, dead, hurt, flying, raise = 0, cut = 0, pitch = 0 } = o;
   const p = t * 9;
+  // A friend's katana turns the upper arms every way (holdBlade): none of the other poses do.
+  J.armUR.rotation.y = 0;
+  J.armUL.rotation.y = 0;
 
   if (dead) {
     J.grip.quaternion.identity();
@@ -541,8 +545,107 @@ export function pose(J, o) {
     J.armFR.rotation.x = 0.25 + Math.max(0, swing2) * 0.5;
     J.armFL.rotation.x = 0.25 + Math.max(0, swing) * 0.5;
   }
+  // A friend's katana is held with both hands, as yours is: it sets the arms and the grip itself.
+  if (o.blade && !(raise > 0 || cut > 0)) return holdBlade(J, o.blade);
   // Anywhere else the prop rides the forearm as it was built: forward from a
   // hanging hand, up with the blade in a wind-up.
   if (aim && !(raise > 0 || cut > 0)) layGun(J, pitch);
   else J.grip.quaternion.identity();
+}
+
+// Where a figure's hands are for the katana's moves, in the chest's frame, the shoulders at
+// (±0.22, 0.44, 0); KATANA_MOVES (weapons/models.js) says where the blade points, the same as in
+// your own hands. The right hand is on the hilt by the guard and the left `apart` behind it. The
+// slash brings the hands from above the right shoulder down past the left hip, out in front at
+// the middle of the cut, and turns the chest from `twist[0]` to `twist[1]` with it, the right
+// shoulder coming forward through the cut.
+const BLADE_HANDS = {
+  rest: new THREE.Vector3(0.2, 0.08, -0.18),
+  guard: new THREE.Vector3(0.08, 0.45, -0.3),
+  slash: { from: new THREE.Vector3(0.2, 0.68, -0.05), to: new THREE.Vector3(-0.14, 0.12, -0.2), bulge: 0.2 },
+  apart: 0.09,
+  twist: [-0.3, 0.4],
+};
+// How far the arm reaches to the hand (limb lengths in buildFigure), and which way each elbow points.
+const ARM = { upper: 0.30, fore: 0.22 };
+const ELBOW_R = new THREE.Vector3(0.6, -1, 0.3).normalize();
+const ELBOW_L = new THREE.Vector3(-0.6, -1, 0.3).normalize();
+
+const _hand = new THREE.Vector3();
+const _dirB = new THREE.Vector3();
+const _cutDir = new THREE.Vector3();
+const _spineB = new THREE.Vector3();
+const _qBlade = new THREE.Quaternion();
+const _qTo = new THREE.Quaternion();
+const _qFree = new THREE.Quaternion();
+const _cut = { a: 0, w: 0 };
+const _d = new THREE.Vector3(), _n = new THREE.Vector3(), _u = new THREE.Vector3(), _f = new THREE.Vector3(), _w = new THREE.Vector3();
+const _xb = new THREE.Vector3(), _yb = new THREE.Vector3(), _zb = new THREE.Vector3(), _mb = new THREE.Matrix4();
+
+/**
+ * Turn an arm so its hand (where the grip rides, ARM.fore down the forearm) is at `target`, in the
+ * chest's frame, the elbow bent out towards `pole`: the upper arm's turn into `q`, and the elbow's
+ * bend returned. A target out of reach is reached for as far as the arm goes.
+ */
+function reach(upper, target, pole, q) {
+  const a = ARM.upper, b = ARM.fore;
+  _d.copy(target).sub(upper.position);
+  const L = Math.min(Math.max(_d.length(), 0.05), a + b - 1e-3);
+  _d.normalize();
+  const cosA = (a * a + L * L - b * b) / (2 * a * L);
+  _n.copy(pole).addScaledVector(_d, -pole.dot(_d)).normalize();
+  // the upper arm, out from the line to the hand towards the pole, and the forearm on to the hand
+  _u.copy(_d).multiplyScalar(cosA).addScaledVector(_n, Math.sqrt(Math.max(0, 1 - cosA * cosA)));
+  _f.copy(_d).multiplyScalar(L).addScaledVector(_u, -a).normalize();
+  // a limb hangs down its own −y, and the elbow bends it towards −z
+  const bend = Math.acos(Math.max(-1, Math.min(1, _u.dot(_f))));
+  _w.copy(_f).addScaledVector(_u, -_u.dot(_f));
+  if (_w.lengthSq() < 1e-8) _w.copy(_n).negate();
+  _yb.copy(_u).negate();
+  _zb.copy(_w).normalize().negate();
+  _xb.crossVectors(_yb, _zb);
+  q.setFromRotationMatrix(_mb.makeBasis(_xb, _yb, _zb));
+  return bend;
+}
+
+/**
+ * A friend's katana, posed as KATANA_MOVES and BLADE_HANDS say: `slash` 0-1 through a slash, or
+ * below 0 for none, and `guard` 0-1 how far the guard is up. Both hands are on the hilt for the
+ * guard and the slash; at the rest the right holds it and the left arm swings as pose() left it.
+ */
+function holdBlade(J, { slash = -1, guard = 0 }) {
+  const H = BLADE_HANDS;
+  const R = KATANA_MOVES.rest, G = KATANA_MOVES.guard;
+  // the blade and the right hand: the rest, up into the guard, on into the slash
+  bladeTurn(R.dir, R.spine, _qBlade);
+  _hand.copy(H.rest);
+  if (guard > 0) {
+    _qBlade.slerp(bladeTurn(G.dir, G.spine, _qTo), guard);
+    _hand.lerp(H.guard, guard);
+  }
+  const s = slash >= 0 ? slashAt(slash, _cut) : null;
+  let twist = 0;
+  if (s && s.w > 0) {
+    slashBlade(s.a, _cutDir, _spineB);
+    _qBlade.slerp(bladeTurn(_cutDir, _spineB, _qTo), s.w);
+    _hand.lerp(slashHands(s.k, H.slash, _cutDir), s.w);
+    twist = s.w * (H.twist[0] + (H.twist[1] - H.twist[0]) * s.k);
+  }
+  J.chest.rotation.y += twist;
+  _dirB.set(0, 0, -1).applyQuaternion(_qBlade);
+  const both = Math.max(guard, s ? s.w : 0);
+
+  // the right arm to the hand, and the blade laid in it: the grip's turn undoes the arm's
+  J.armFR.rotation.set(reach(J.armUR, _hand, ELBOW_R, J.armUR.quaternion), 0, 0);
+  J.grip.quaternion.copy(J.armUR.quaternion).multiply(_qTo.setFromEuler(J.armFR.rotation)).invert().multiply(_qBlade);
+
+  // the left hand behind it on the hilt, as far as the guard or the slash has brought it there
+  if (both > 0) {
+    _hand.addScaledVector(_dirB, -H.apart);
+    _qFree.copy(J.armUL.quaternion);
+    const freeBend = J.armFL.rotation.x;
+    const bend = reach(J.armUL, _hand, ELBOW_L, _qTo);
+    J.armUL.quaternion.copy(_qFree).slerp(_qTo, both);
+    J.armFL.rotation.set(freeBend + (bend - freeBend) * both, 0, 0);
+  }
 }

@@ -215,6 +215,43 @@ not this plan (below).
   The desktop p99 is on its limit for both, as `ai/summary.md` already records for this machine.
 - **Not run:** a bot run. The sniper case it used to stall in is now a `game.mjs` case.
 
+## After a first look: the katana
+
+A friend's slash looked strange, and their guard did not show at all. Both now move as your own
+katana does.
+
+- **One set of moves** (`KATANA_MOVES` in `weapons/models.js`):
+  - **rest:** low on the right;
+  - **slash:** raised on the right, then cut diagonally down to the left;
+  - **guard:** the blade held level across the front of the body, edge out.
+
+  These say where the blade points. Your hands are placed by `KATANA_HANDS` (`weapons/index.js`).
+  A friend's are placed by `BLADE_HANDS` (`rig.js`), where a two-bone reach puts both hands on the
+  hilt.
+- **Your own slash** used to roll the blade about its length, low on the right, and every other
+  slash rolled the other way. **A friend's** was a cutter's chop, from behind the head straight
+  down.
+- **The slash turns the blade nearly square to the way you face.** Tried first: a slash through
+  straight ahead, which is what a sword does. From your own eye the blade then points down the line
+  of sight, and only the hilt is seen going by.
+- **The guard goes out in presence as `g`,** held up at least 300 ms, so that a parry (a tap of
+  aim) is not lost between two reports.
+- **The dash-slash is drawn as a slash in your hands.** A friend already saw one.
+- **New checks:**
+  - `game.mjs`: the tip crosses your view from top right to bottom left, and the guard lies level
+    below the crosshair;
+  - `coop.mjs`: the same on a friend's figure, plus a 60 ms tap of aim is seen.
+- **Test windows:** `game.mjs` and `touch.mjs` now launch Chrome with
+  `--disable-backgrounding-occluded-windows`, as `coop.mjs` does. Since the pause on a hidden page,
+  a test window covered by another counted as hidden and paused the run. That cost two `game.mjs`
+  runs: once 87/89, once 86/89 with the game left paused.
+- **Results:**
+  - `game` 89/89;
+  - `coop` 41/41, its phone frame-time check passing too (35 against 35 fps);
+  - `touch` 55/55;
+  - `collide` clean (0.0% missed; 2213 shots register beside a figure, within the pose variation
+    above).
+
 ## What comes next
 
 1. **A look by hand**, on a desktop and a real phone:

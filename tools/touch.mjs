@@ -33,10 +33,11 @@ const check = (name, ok, detail) => {
   console.log(` ${ok ? 'PASS' : 'FAIL'}  ${name.padEnd(28)} ${detail}`);
 };
 
+// A covered window is hidden to its page, and a hidden page pauses the game (game.js): kept showing.
 const browser = await chromium.launch({
   channel: 'chrome',
   headless: false,
-  args: ['--hide-scrollbars', '--mute-audio'],
+  args: ['--hide-scrollbars', '--mute-audio', '--disable-backgrounding-occluded-windows'],
 });
 const ctx = await browser.newContext({
   ...devices['Pixel 5'],

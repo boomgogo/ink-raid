@@ -509,14 +509,19 @@ const drawnOf = (p) => run(p, () => ({ ...window.__ink.net.crew.drawn }));
     `${after.shots - before.shots} shot, ${after.tracers - before.tracers} tracers for ${n} pellets`);
 }
 {
-  // a slash: the arm goes up over the head, and down through the cut
+  // A slash, as it is in your own hands (weapons/models.js KATANA_MOVES): the tip goes up on
+  // their right, then down to their left. Read off the figure in its own frame: x to its right,
+  // y up from its feet. It used to be a cutter's chop, from behind the head straight down.
   await held(3);
   await run(A, (b) => {
     const m = window.__ink.net.crew.mates.get(b);
-    window.__arm = [];
+    const prop = m.fig.props.katana;
+    window.__tips = [];
     const tick = () => {
-      if (!window.__arm) return;
-      window.__arm.push(m.fig.J.armUR.rotation.x);
+      if (!window.__tips) return;
+      m.fig.root.updateMatrixWorld(true);
+      const tip = prop.userData.muzzle.clone().applyMatrix4(prop.matrixWorld);
+      window.__tips.push(m.fig.root.worldToLocal(tip).toArray());
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
@@ -524,11 +529,55 @@ const drawnOf = (p) => run(p, () => ({ ...window.__ink.net.crew.drawn }));
   const before = await drawnOf(A);
   await run(B, () => window.__ink.game.weapon.beginSwing());
   await sleep(1000);
-  const arm = await run(A, () => { const a = window.__arm; window.__arm = null; return a; });
+  const tips = await run(A, () => { const t = window.__tips; window.__tips = null; return t; });
   const after = await drawnOf(A);
-  const top = Math.min(...arm);
-  check('a friend\'s slash: drawn as a cut', after.slashes - before.slashes === 1 && top < -2,
-    `${after.slashes - before.slashes} slash, the arm up to ${top.toFixed(2)} rad`);
+  let hi = 0, lo = 0;
+  for (let i = 0; i < tips.length; i++) {
+    if (tips[i][1] > tips[hi][1]) hi = i;
+    if (tips[i][1] < tips[lo][1]) lo = i;
+  }
+  const [h, l] = [tips[hi], tips[lo]];
+  check('a friend\'s slash: top right to bottom left', after.slashes - before.slashes === 1 && h[0] > 0.1 && l[0] < -0.1 && hi < lo && h[1] - l[1] > 1,
+    `${after.slashes - before.slashes} slash; the tip up to ${h[1].toFixed(2)} m, ${h[0].toFixed(2)} m to their right, then down to ${l[1].toFixed(2)} m, ${(-l[0]).toFixed(2)} m to their left`);
+}
+{
+  // The guard, as yours is: the blade level across the front of them. And a parry, aim tapped for
+  // a moment: up and down again between two reports, it would never be seen (crew.js GUARD_SHOWN_MS).
+  const guardOf = () => run(A, (b) => {
+    const m = window.__ink.net.crew.mates.get(b);
+    const prop = m.fig.props.katana;
+    m.fig.root.updateMatrixWorld(true);
+    const V = prop.position.constructor;
+    const tip = m.fig.root.worldToLocal(prop.userData.muzzle.clone().applyMatrix4(prop.matrixWorld));
+    const hand = m.fig.root.worldToLocal(prop.getWorldPosition(new V()));
+    return { up: m.guard, dir: tip.clone().sub(hand).normalize().toArray(), tip: tip.toArray() };
+  }, bId);
+  await run(B, () => { window.__ink.input.aim = true; });
+  await sleep(600);
+  const up = await guardOf();
+  await run(B, () => { window.__ink.input.aim = false; });
+  await sleep(800);
+  const down = await guardOf();
+  const [dx, dy] = up.dir;
+  check('a friend\'s guard: level across the body', up.up > 0.9 && dx < -0.8 && Math.abs(dy) < 0.3 && up.tip[2] < 0 && up.tip[1] > 1 && down.up < 0.1,
+    `up ${up.up.toFixed(2)}: the blade ${(Math.acos(-dx) * 180 / Math.PI).toFixed(0)} deg off level to their left, its tip ${up.tip[1].toFixed(2)} m up and ${(-up.tip[2]).toFixed(2)} m in front; down again ${down.up.toFixed(2)}`);
+  await run(A, (b) => {
+    const m = window.__ink.net.crew.mates.get(b);
+    window.__most = 0;
+    const tick = () => {
+      if (window.__most == null) return;
+      window.__most = Math.max(window.__most, m.guard);
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }, bId);
+  await run(B, () => new Promise((r) => {
+    window.__ink.input.aim = true;
+    setTimeout(() => { window.__ink.input.aim = false; r(); }, 60);
+  }));
+  await sleep(900);
+  const most = await run(A, () => { const m = window.__most; window.__most = null; return m; });
+  check('a friend\'s parry: a tap of aim is seen', most > 0.8, `aim held 60 ms; the guard up to ${most.toFixed(2)} on the host's page`);
   await held(0);
 }
 {

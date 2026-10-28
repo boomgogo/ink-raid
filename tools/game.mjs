@@ -15,7 +15,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const RECORD = process.env.RECORD !== '0';
 
-const browser = await chromium.launch({ channel: 'chrome', headless: false, args: ['--hide-scrollbars', '--mute-audio'] });
+// A window another covers is hidden to its page, as far as Chrome is concerned, and a hidden page
+// pauses the game (game.js): the window is kept showing however it is covered, as coop.mjs does.
+const browser = await chromium.launch({
+  channel: 'chrome', headless: false,
+  args: ['--hide-scrollbars', '--mute-audio', '--disable-backgrounding-occluded-windows'],
+});
 const ctx = await browser.newContext({
   viewport: { width: 1280, height: 800 },
   deviceScaleFactor: 1,
@@ -676,6 +681,52 @@ await page.evaluate(() => window.__ink.game.selectWeapon(0));
 
   const focusUi = await page.evaluate(() => document.querySelector('#irEdge').classList.contains('ir-on'));
   check('focus meter shows', focusUi, 'visible with the katana out');
+
+  // The katana as you see it, the same moves a friend's figure makes (weapons/models.js
+  // KATANA_MOVES): a slash whose tip goes from the top right of the view to the bottom left, and a
+  // guard that holds the blade level across the view, below the crosshair. The slash used to roll
+  // the blade about its own length, low on the right.
+  const seen = await page.evaluate(async () => {
+    const G = window.__ink.game, I = window.__ink.input, cam = window.__ink.camera;
+    const W = G.weapon;
+    const V = cam.position.constructor;
+    // the tip on the screen (-1 to 1 each way), and the blade's way in the camera's frame
+    const look = () => {
+      const tip = W.model.muzzle.clone().applyMatrix4(W.model.root.matrixWorld);
+      const guard = new V().applyMatrix4(W.model.root.matrixWorld);
+      const inCam = cam.worldToLocal(tip.clone());
+      const dir = inCam.clone().sub(cam.worldToLocal(guard)).normalize();
+      return { front: inCam.z < -0.05, screen: tip.project(cam).toArray(), dir: dir.toArray() };
+    };
+    await window.__wait(400);
+    const tips = [];
+    W.beginSwing();
+    while (W.swingClock > 0) {
+      const l = look();
+      if (l.front) tips.push(l.screen);
+      await new Promise((r) => requestAnimationFrame(r));
+    }
+    I.aim = true;
+    await window.__wait(400);
+    const guard = look();
+    I.aim = false;
+    await window.__wait(400);
+    return { tips, guard };
+  });
+  {
+    const { tips, guard } = seen;
+    let hi = 0, lo = 0;
+    for (let i = 0; i < tips.length; i++) {
+      if (tips[i][1] > tips[hi][1]) hi = i;
+      if (tips[i][1] < tips[lo][1]) lo = i;
+    }
+    const h = tips[hi] || [0, 0], l = tips[lo] || [0, 0];
+    check('katana slash: top right to bottom left', tips.length > 3 && h[0] > 0 && h[1] > 0.5 && l[0] < 0 && l[1] < -0.3 && hi < lo,
+      `${tips.length} frames in view; the tip from (${h[0].toFixed(2)}, ${h[1].toFixed(2)}) to (${l[0].toFixed(2)}, ${l[1].toFixed(2)}) on the screen`);
+    const [dx, dy] = guard.dir;
+    check('katana guard: level across', dx < -0.8 && Math.abs(dy) < 0.3 && guard.screen[1] < 0,
+      `the blade ${(Math.acos(-dx) * 180 / Math.PI).toFixed(0)} deg off level, to the left; its tip at ${guard.screen[1].toFixed(2)} down the screen`);
+  }
 
   // Fill the gauge and spend it, through the buttons. Raising the guard while
   // fire is already held must not launch you; a fire PRESS while guarding must.

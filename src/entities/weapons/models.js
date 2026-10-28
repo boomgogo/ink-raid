@@ -448,6 +448,87 @@ export function buildKatana() {
 }
 
 /**
+ * How the katana moves, the same in your hands (weapons/index.js) and in a friend's (rig.js):
+ *
+ *   the slash   raised on the right, the tip up, and cut diagonally down to the left, edge first
+ *   the guard   the blade held level across the front of the body, edge out
+ *   the rest    low on the right, the tip forward and a little in, as your own is held
+ *
+ * Directions are in the holder's frame: x to their right, y up, −z the way they face. Each
+ * says where the blade points (the model's −z) and where its spine is (its +y). Where the
+ * hands are is the drawer's to say (slashHands): your eye and a figure's shoulders are not in
+ * the same place.
+ *
+ * In the slash the hands go from up on the right down to the left, and the blade turns with
+ * them through the plane of `up` and `across`: at angle `a` it points sin(a) up and cos(a)
+ * across, from up (`from`) round through up-and-left to down-and-left (`to`). That plane is
+ * nearly square to the way they face, so the blade is seen along its length through the whole
+ * cut, from behind it (your own eyes) and from in front (a friend's). A cut in the plane of
+ * `up` and straight ahead is what a sword does, but from the eye that swings it the blade then
+ * points away down the line of sight, and all that is seen go by is the hilt.
+ *
+ * It is wound up by `raised` of its time, cut by `cut`, and brought back to the rest by the end.
+ * The blow lands at 0.4 (Katana.update), as the blade crosses in front.
+ */
+const SLASH_UP = new THREE.Vector3(0.75, 1, 0).normalize();
+export const KATANA_MOVES = {
+  up: SLASH_UP,                         // up, and to the right
+  // across to the left, and a little ahead (squared to `up`)
+  across: new THREE.Vector3(-1, 0, -0.45).projectOnPlane(SLASH_UP).normalize(),
+  from: 1.3,            // the tip up, a little to the right
+  to: -1.35,            // down and to the left: the other way along the diagonal from `up`
+  raised: 0.2,
+  cut: 0.65,
+  guard: { dir: new THREE.Vector3(-1, 0.12, -0.25).normalize(), spine: new THREE.Vector3(0, 0, 1) },
+  rest: { dir: new THREE.Vector3(-0.34, 0.05, -0.94).normalize(), spine: new THREE.Vector3(0, 1, 0) },
+};
+
+/**
+ * Where the slash is at `t` (0-1 of its time): the angle `a` the blade is at, `k` how far through
+ * the cut the hands are (0-1), and `w`, how far they are into the slash from where they were.
+ */
+export function slashAt(t, out = {}) {
+  const M = KATANA_MOVES;
+  const s = (u) => u * u * (3 - 2 * u);
+  if (t < M.raised) {
+    out.w = s(t / M.raised);
+    out.k = 0;
+  } else if (t < M.cut) {
+    out.w = 1;
+    out.k = s((t - M.raised) / (M.cut - M.raised));
+  } else {
+    out.w = s(1 - (t - M.cut) / (1 - M.cut));
+    out.k = 1;
+  }
+  out.a = M.from + (M.to - M.from) * out.k;
+  return out;
+}
+
+/** The blade at angle `a` of the slash: where it points, and its spine, behind the edge that leads. */
+export function slashBlade(a, dir, spine) {
+  const M = KATANA_MOVES;
+  dir.copy(M.across).multiplyScalar(Math.cos(a)).addScaledVector(M.up, Math.sin(a));
+  spine.copy(M.up).multiplyScalar(Math.cos(a)).addScaledVector(M.across, -Math.sin(a));
+}
+
+/**
+ * Where the hands are `k` of the way through the cut: from `hands.from` to `hands.to`, and out
+ * ahead by up to `hands.bulge` in the middle, as arms reach through a cut.
+ */
+export function slashHands(k, hands, out) {
+  return out.copy(hands.from).lerp(hands.to, k).setZ(out.z - hands.bulge * Math.sin(Math.PI * k));
+}
+
+const _bx = new THREE.Vector3(), _by = new THREE.Vector3(), _bz = new THREE.Vector3(), _bm = new THREE.Matrix4();
+/** The katana's turn, pointing along `dir` with its spine towards `spine` (squared to it), into `q`. */
+export function bladeTurn(dir, spine, q) {
+  _bz.copy(dir).normalize().negate();
+  _by.copy(spine).addScaledVector(_bz, -spine.dot(_bz)).normalize();
+  _bx.crossVectors(_by, _bz);
+  return q.setFromRotationMatrix(_bm.makeBasis(_bx, _by, _bz));
+}
+
+/**
  * The thrown grenade: a body with a groove round it and one over the top, the
  * fuse's cap, the lever down its side, and the pin's ring. Two geometries, the
  * body and the fittings, for two instanced meshes (weapons/grenade.js).

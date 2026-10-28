@@ -81,7 +81,8 @@ title opens p3p2's panel, with the invite link and a QR code to pass on.
 - If the host leaves, the next player carries on with the same figures and the same wave.
 - You see your friends holding the same weapon you would, the one in their hands, aimed where they
   look. Their shots leave tracers and marks on the desk, and you hear them, their steps and their
-  jetpack too. Their katana slashes and their grenades show.
+  jetpack too. Their grenades show, and their katana moves as yours does: a slash from top right
+  to bottom left, and a guard held level across the body.
 
 Alone, the game asks no server anything: it loads p3p2's 2 KB entry and nothing more.
 

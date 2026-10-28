@@ -6,6 +6,7 @@ import { MOVE } from '../entities/player.js';
 import { jetPuffs, JET } from '../entities/jetpack.js';
 import { INK } from '../render/palette.js';
 import { raycast } from '../core/physics.js';
+import { ease } from '../core/spring.js';
 import { Reader, Writer, ENDED, num } from './wire.js';
 
 // The others on the desk: each player's own page says where its player is (presence), and
@@ -19,7 +20,7 @@ import { Reader, Writer, ENDED, num } from './wire.js';
 //   a   1 alive, 0 down                    r   the run it is in, or 0
 //   k   kills this run                     c   1 crouched
 //   j   1 while its jetpack burns          w   the weapon in its hands: rifle, shotgun, sniper,
-//                                              katana or stapler
+//   g   1 while its katana's guard is up       katana or stapler
 //
 // And what its player's weapons do, for the others to see (`pf`, bytes, droppable, twenty
 // batches a second at most). It is for show: it hurts nobody, as a guest's hits on the figures
@@ -55,6 +56,14 @@ const PF_SECONDS = 0.05;
 const PF_MOST = 32;
 /** A friend's shot is drawn this long after it comes, ms: Smooth's own delay, so the gun fires as it is drawn. */
 const PLAYBACK_MS = 120;
+/**
+ * A guard is said to be up for at least this long, ms. Presence goes twenty times a second at
+ * most and says only where things ended up, so a parry, a tap of aim, could be up and down again
+ * between two reports and never be seen.
+ */
+const GUARD_SHOWN_MS = 300;
+/** How fast a friend's guard comes up and goes down: as fast as your own (Katana.guardMix). */
+const GUARD_EASE = 14;
 /** A friend's shots are heard to this far, metres, quieter on the way: as the host's figures' are. */
 const HEARD = 60;
 /**
@@ -91,6 +100,7 @@ export class Crew {
     this.tags.className = 'ir-tags';
     hud.appendChild(this.tags);
     this._said = {};
+    this._guardAt = -Infinity;
     this._offs = [];
     this._order = [];
     // what this page's player did since the last batch went
@@ -126,8 +136,11 @@ export class Crew {
     this.room = null;
   }
 
-  /** This page's player, as the others are to see it. Every frame; the library sends what changed. */
-  say(player, runId, kills, held) {
+  /**
+   * This page's player, as the others are to see it. Every frame; the library sends what changed.
+   * `guard`: the katana's guard is up.
+   */
+  say(player, runId, kills, held, guard) {
     const r = this.room;
     if (!r) return;
     const b = player.body;
@@ -143,6 +156,9 @@ export class Crew {
     s.c = player.crouching ? 1 : 0;
     s.j = player.jet.burning ? 1 : 0;
     s.w = held;
+    const now = performance.now();
+    if (guard) this._guardAt = now;
+    s.g = now - this._guardAt < GUARD_SHOWN_MS ? 1 : 0;
     r.presence.set(s);
   }
 
@@ -264,11 +280,12 @@ export class Crew {
     };
     // `pack`: where their jetpack is, for its puffs, and how fast it goes
     const pack = { pos: new THREE.Vector3(), vel: new THREE.Vector3(), puff: 0, seen: false };
-    // `fire`: their shots, slashes and throws, waiting to be drawn; `slashT`: a slash under way
+    // `fire`: their shots, slashes and throws, waiting to be drawn; `slashT`: a slash under way;
+    // `guard`: how far their katana's guard is up, 0-1
     // `dist`, `rank`: how far, and how near among the others, for what of theirs is heard
     return {
       member, fig, tag, proxy, said: null, phase: Math.random() * 10, downFor: 0, pack, held: null, fire: [], slashT: 0,
-      stride: 0, hiss: 0, dist: Infinity, rank: 0,
+      guard: 0, stride: 0, hiss: 0, dist: Infinity, rank: 0,
     };
   }
 
@@ -320,6 +337,7 @@ export class Crew {
         mate.tag.style.display = 'none';
         mate.fire.length = 0;
         mate.slashT = 0;
+        mate.guard = 0;
         mate.dist = Infinity;
         continue;
       }
@@ -358,18 +376,20 @@ export class Crew {
         mate.held = held;
         for (const kind in fig.props) fig.props[kind].visible = kind === held;
       }
-      // A gun is up and aimed where they look, unless they sprint; the katana is carried.
+      // A gun is up and aimed where they look, unless they sprint. The katana moves as it does in
+      // your own hands (weapons/models.js KATANA_MOVES): held low on the right, slashed from over
+      // the right shoulder down to the left hip, and raised level across the body for the guard.
       // Crouched, they are lower and bent forward at the hips.
-      // A slash goes up over the head and down through the cut, as a cutter's does.
       const crouched = alive && said.c === 1;
       const slash = this.kit().slash;
+      const blade = alive && held === 'katana';
       mate.slashT = Math.max(0, mate.slashT - dt);
+      mate.guard = ease(mate.guard, blade && said.g === 1 ? 1 : 0, GUARD_EASE, dt);
       pose(fig.J, {
         t: mate.phase, walk, lean: walk * 0.25 + (crouched ? 0.7 : 0), hurt: 0,
-        aim: alive && held !== 'katana' && said.st !== SPRINT,
+        aim: alive && !blade && said.st !== SPRINT,
         pitch: Math.max(-1.2, Math.min(1.2, num(said.pt))),
-        raise: mate.slashT > 0 ? 1 : 0,
-        cut: mate.slashT > 0 ? 1 - mate.slashT / slash : 0,
+        blade: blade ? { slash: mate.slashT > 0 ? 1 - mate.slashT / slash : -1, guard: mate.guard } : null,
         flying: alive && said.j === 1,
         dead: !alive, downFor: mate.downFor,
       });

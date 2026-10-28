@@ -3,7 +3,10 @@ import { Wobble, Wobble3, ease, clamp } from '../../core/spring.js';
 import { raycast } from '../../core/physics.js';
 import { IMPULSE } from '../../world/toys.js';
 import { INK } from '../../render/palette.js';
-import { buildRifle, buildShotgun, buildSniper, buildKatana, buildFlash, buildStapleGun } from './models.js';
+import {
+  buildRifle, buildShotgun, buildSniper, buildKatana, buildFlash, buildStapleGun,
+  KATANA_MOVES, slashAt, slashBlade, slashHands, bladeTurn,
+} from './models.js';
 import { EM } from '../../ui/hud.js';
 import { ENDED } from '../../net/wire.js';
 
@@ -579,6 +582,23 @@ export const GUARD = {
 // metres", per the target.
 const KATANA_NOISE = 4;
 
+// Where your hands are for the katana's moves, in the camera's frame; KATANA_MOVES (models.js)
+// says where the blade points, the same as for a friend's figure. The guard holds the blade level
+// across the view, below the crosshair. The slash brings the hands down from the right of the view
+// to the bottom of it, the blade standing up out of the top right at the start and laid out to
+// the bottom left at the end.
+const KATANA_HANDS = {
+  guard: new THREE.Vector3(0.2, -0.17, -0.42),
+  slash: { from: new THREE.Vector3(0.3, -0.05, -0.45), to: new THREE.Vector3(0, -0.42, -0.45), bulge: 0 },
+};
+const _slash = { a: 0, w: 0 };
+const _spine = new THREE.Vector3();
+const _e = new THREE.Euler();
+const _q = new THREE.Quaternion();
+const _qTo = new THREE.Quaternion();
+const _qOff = new THREE.Quaternion();
+const _off = new THREE.Vector3();
+
 export class Katana extends WeaponBase {
   constructor(ctx, player) {
     super(ctx, player);
@@ -593,7 +613,6 @@ export class Katana extends WeaponBase {
     this.arc = Math.cos((55 * Math.PI) / 180); // 55 deg half-angle, mid the 50-60 deg target
     this.swingClock = 0;
     this.swingTime = 0.28;     // inside the 0.25-0.35 s target, on the quick side so a slash answers the tell
-    this.combo = 0;
     this.strikeLanded = false;
     this.guardMix = 0;
     this.resetGuard();
@@ -615,13 +634,12 @@ export class Katana extends WeaponBase {
     this.root.add(built.root);
     this.root.scale.setScalar(0.7);
     // Held low and to the right at rest, tip forward, with a light tilt — the
-    // same idea as a gun's hip pose. Raised and brought inward for the guard,
-    // the blade crossing in front of the camera. Checked in shots/stills/game-katana.png.
+    // same idea as a gun's hip pose, and KATANA_MOVES.rest. The guard and the
+    // slash are posed over it (hold), not by aiming: aim raises the guard, and
+    // there is no sight to bring up. Checked in shots/stills/game-katana.png.
     this.restPos.set(0.32, -0.28, -0.42);
     this.restRot.set(0.05, 0.35, 0.08);
-    this.aimRot.copy(this.restRot);
-    this.sightPos.set(0.06, -0.16, -0.30);
-    this.guardRot = new THREE.Vector3(-0.55, 0.35, 0.55);
+    this.canAim = false;
   }
 
   get ammoText() { return '∞'; }
@@ -754,6 +772,9 @@ export class Katana extends WeaponBase {
     this.focus = 0;
     this.focusReady = false;
     this.dashT = 0.30;
+    // drawn as a slash, as a friend sees it (net/crew.js); the dash lands the blows itself
+    this.swingClock = this.swingTime;
+    this.strikeLanded = true;
     _dir.set(0, 0, -1).applyEuler(p.camera.rotation);
     p.launch(_dir.x * 34, Math.max(p.body.vel.y, 2), _dir.z * 34, 0.34);
     p.feel.punch.kick(-18);
@@ -769,7 +790,6 @@ export class Katana extends WeaponBase {
     this.ctx.enemies?.noise(this.player.eye, KATANA_NOISE);
     this.swingClock = this.swingTime;
     this.strikeLanded = false;
-    this.combo = (this.combo + 1) % 3;
     this.cooldown = this.swingTime * 0.8;
     this.ctx.audio?.swing();
     this.ctx.tell?.swing();
@@ -838,20 +858,43 @@ export class Katana extends WeaponBase {
     }
 
     this.place(dt, input);
+    this.hold();
+  }
 
-    // the swing itself, layered on top of the rest pose
-    if (this.swingClock > 0) {
-      const t = 1 - this.swingClock / this.swingTime;
-      const swing = Math.sin(t * Math.PI);
-      const dirSign = this.combo === 1 ? -1 : 1;
-      this.root.rotation.z += swing * 2.4 * dirSign;
-      this.root.rotation.x -= swing * 0.9;
-      this.root.position.z -= swing * 0.24;
+  /**
+   * The guard and the slash, over the rest pose place() has just set: the blade where
+   * KATANA_MOVES says, as a friend's figure draws yours (rig.js), with the hands where
+   * KATANA_HANDS puts them. What place() adds to the rest (bob, sway, the kicks of a block or a
+   * parry, the swing up on a draw) is kept on top.
+   *
+   * The swing used to roll the blade about its own length and back, low on the right, with
+   * every other slash the other way: a twirl, where a friend saw a chop from over the head.
+   */
+  hold() {
+    const g = this.guardMix;
+    const s = this.swingClock > 0 ? slashAt(1 - this.swingClock / this.swingTime, _slash) : null;
+    if (g < 0.001 && !(s && s.w > 0)) return;
+    const r = this.root;
+    const back = this.model.grip.z * r.scale.x;    // the hands are this far behind the guard, along the blade
+    // what place() put on the rest pose
+    _q.setFromEuler(_e.set(this.restRot.x, this.restRot.y, this.restRot.z));
+    _qOff.copy(_q).invert().multiply(r.quaternion);
+    _off.copy(r.position).sub(this.restPos);
+    // the rest, up into the guard...
+    _tmp.copy(this.restPos);
+    if (g >= 0.001) {
+      const G = KATANA_MOVES.guard;
+      _q.slerp(bladeTurn(G.dir, G.spine, _qTo), g);
+      _tmp.lerp(_world.copy(KATANA_HANDS.guard).addScaledVector(G.dir, back), g);
     }
-    if (this.guardMix > 0.01) {
-      this.root.rotation.x += (this.guardRot.x - this.restRot.x) * this.guardMix;
-      this.root.rotation.z += (this.guardRot.z - this.restRot.z) * this.guardMix;
+    // ...and on into the slash, from wherever it was
+    if (s && s.w > 0) {
+      slashBlade(s.a, _dir, _spine);
+      _q.slerp(bladeTurn(_dir, _spine, _qTo), s.w);
+      _tmp.lerp(slashHands(s.k, KATANA_HANDS.slash, _world).addScaledVector(_dir, back), s.w);
     }
+    r.quaternion.copy(_q).multiply(_qOff);
+    r.position.copy(_tmp).add(_off);
   }
 
   landBlow() {

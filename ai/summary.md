@@ -72,6 +72,13 @@ paper.
     crosshair while aiming.
   - The katana's blade is built face by face, with a real ridge crease. No `ExtrudeGeometry`: it
     pulled in three's triangulation, about 5 KB gzip.
+  - The katana moves the same in your hands and in a friend's (`KATANA_MOVES`): it rests low on
+    the right; it slashes from raised on the right diagonally down to the left; and its guard holds
+    the blade level across the front of the body. `KATANA_MOVES` says where the blade points.
+    `KATANA_HANDS` (`weapons/index.js`) says where your hands are, and `BLADE_HANDS` (`rig.js`) a
+    figure's, which reaches both arms to the hilt. The slash turns the blade nearly square to the way
+    the holder faces. A slash in the plane of straight ahead is what a real sword does, but from your
+    own eye the blade then points down the line of sight and only the hilt is seen going by.
 - **Grenades** (`GRENADE`, `entities/weapons/grenade.js`):
   - A full throw lands about 12 m out thrown level, 30 m at the best angle. The table beside
     `GRENADE.throw` gives the landing distances.
@@ -110,6 +117,8 @@ paper.
   - a friend is drawn with the weapon in their hands, aimed where they look (`w` and `pt` in what
     each page sends). It is the very model you hold (`buildProp`, `models.js`), merged, scaled to
     the figure and in its own inks, and its tracers leave from that model's muzzle;
+  - a friend's katana guard goes out as `g` in presence, held up at least 300 ms
+    (`GUARD_SHOWN_MS`), so that a parry, a tap of aim, is not lost between two reports;
   - their shots, slashes and grenades go to the others as `pf` (`net/crew.js`), and are drawn as
     late as the figure is: tracers from the drawn gun, blots on the desk, red splashes on figures.
     It is for show only, since hits still go to the host as `hit`. Their shots and blasts are heard

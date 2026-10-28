@@ -552,7 +552,7 @@ import { FRIEND } from '../src/net/crew.js';
   };
   const figures = Object.entries(TYPES).map(([k, t]) => ({ name: k, t, prop: t.look.prop }));
   for (const prop of FRIEND.look.props) figures.push({ name: `friend ${prop}`, t: FRIEND, prop });
-  const GUNS_HELD = new Set(['rifle', 'shotgun', 'sniper', 'pistol', 'staples', 'marker', 'tape']);
+  const GUNS_HELD = new Set(['rifle', 'shotgun', 'sniper', 'pistol', 'staples', 'stapler', 'marker', 'tape']);
   const AIMS = [-0.6, 0, 0.6];
   const poses = [
     { name: 'rest', o: { walk: 0 } },
@@ -797,6 +797,10 @@ const foes = await page.evaluate(() => {
     let rays = 0, phantom = 0, missed = 0, hit = 0, oldPhantom = 0, oldMissed = 0;
     const missBand = new Array(10).fill(0);
     const N = 121;
+    // every ray, by where it is in the grid: 1 on the drawing, 2 a registered shot beside it
+    // (its part's initial after), for how far beside it each lands (worked out in node)
+    const grid = new Array(N * N).fill(0);
+    const parts = {};
     for (let iy = 0; iy < N; iy++) {
       for (let ix = 0; ix < N; ix++) {
         // sweep a window that comfortably contains the figure at 14 m
@@ -825,6 +829,11 @@ const foes = await page.evaluate(() => {
           if (t > 1e-4 && t < best) best = t;
         }
         const onInk = best < Infinity;
+        if (onInk) grid[iy * N + ix] = 1;
+        if (h && !onInk) {
+          grid[iy * N + ix] = 2;
+          parts[h.part] = (parts[h.part] || 0) + 1;
+        }
         if (h && !onInk) phantom++;
         else if (!h && onInk) {
           missed++;
@@ -851,7 +860,7 @@ const foes = await page.evaluate(() => {
         else if (!oldHit && onInk) oldMissed++;
       }
     }
-    rows.push({ type, rays, phantom, missed, hit, oldPhantom, oldMissed, missBand, ink: hit + missed });
+    rows.push({ type, rays, phantom, missed, hit, oldPhantom, oldMissed, missBand, ink: hit + missed, grid, parts, N });
   }
   E.clear();
   G.state = 'playing';
@@ -873,6 +882,31 @@ for (const r of foes) {
 const P = (n, d) => ((n / d) * 100).toFixed(1) + '%';
 console.log(`\n    shots on the drawing that do NOT register:  ${P(fOldMiss, fInk)}  ->  ${P(fMiss, fInk)}`);
 console.log(`    shots that register beside the drawing:     ${fOldPhan}  ->  ${fPhan}`);
+// Where the ones beside it land: on which part's volume, and how far from the drawing. The rays
+// are a grid 4 m across at 14 m, 3.3 cm apart, and the outline is drawn across the figure's edge
+// about 3 px wide there (2.9 cm a pixel), so the first step out is still on the drawn line.
+{
+  const byPart = {}, byGap = [0, 0, 0, 0];
+  const STEP_CM = (4 / 120) * 100;
+  for (const r of foes) {
+    for (const [k, n] of Object.entries(r.parts)) byPart[k] = (byPart[k] || 0) + n;
+    const { grid: g, N } = r;
+    for (let i = 0; i < g.length; i++) {
+      if (g[i] !== 2) continue;
+      const x = i % N, y = (i / N) | 0;
+      let near = Infinity;
+      for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {
+        const xx = x + dx, yy = y + dy;
+        if (xx < 0 || yy < 0 || xx >= N || yy >= N || g[yy * N + xx] !== 1) continue;
+        near = Math.min(near, Math.hypot(dx, dy));
+      }
+      byGap[near <= 1 ? 0 : near <= 2 ? 1 : near <= 4 ? 2 : 3]++;
+    }
+  }
+  console.log(`      by part: ${Object.entries(byPart).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(', ')}`);
+  console.log(`      by how far from the drawing: on its outline (${STEP_CM.toFixed(1)} cm) ${byGap[0]}, `
+    + `to ${(2 * STEP_CM).toFixed(1)} cm ${byGap[1]}, to ${(4 * STEP_CM).toFixed(1)} cm ${byGap[2]}, further ${byGap[3]}`);
+}
 const bands = new Array(10).fill(0);
 for (const r of foes) r.missBand.forEach((n, i) => { bands[i] += n; });
 if (fMiss) {

@@ -102,12 +102,12 @@ export class Screens {
 
     const howtoBody = o.touch ? `
       <p><b>left thumb</b> — the floating stick that appears where you press: push it far to sprint.</p>
-      <p><b>right side</b> — drag to look; a quick tap there fires one shot.</p>
+      <p><b>right side</b> — drag to look; INK fires.</p>
       <p><b>INK</b> holds the trigger and keeps aiming while you drag on it.</p>
       <p>the <b>INK</b> at the top left holds the trigger too, so you can fire with your left thumb while your right one aims.</p>
       <p><b>UP</b> jump (again in the air) &middot; <b>DUCK</b> crouch, or slide while moving fast</p>
       <p><b>JET</b> hold to fly; it refuels while you are not flying &middot; <b>BLAST</b> grenade</p>
-      <p>along the top: <b>LOAD</b> reload &middot; <b>NEXT</b> swap weapon &middot; <b>WRAP</b> once you carry a bandage</p>
+      <p>along the top: <b>LOAD</b> reload &middot; <b>NEXT</b> swap weapon &middot; <b>WRAP</b> once you carry a bandage &middot; <b>PAUSE</b></p>
       <p>shoot down a paper plane for a bandage, or a staple gun</p>
     ` : `
       <p><b>WASD</b> move, mouse to look &middot; <b>Shift</b> sprint &middot; <b>Space</b> jump, again in the air</p>
@@ -171,7 +171,7 @@ export class Screens {
   }
 
   /**
-   * @param {{diffLabel:string, score:number, wave:number, shared?:boolean,
+   * @param {{diffLabel:string, score:number, wave:number, shared?:boolean, touch?:boolean,
    *          onMainMenu:Function, onBackdrop:Function}} o
    */
   pause(o) {
@@ -180,7 +180,7 @@ export class Screens {
       <p class="ir-stats">${esc(o.diffLabel)} &middot; score <b>${o.score}</b> &middot; wave <b>${o.wave}</b></p>
       ${o.shared ? '<p class="ir-best">the desk does not stop for you: your friends are still on it</p>' : ''}
       <button class="ir-leave" id="btnMenu">${quillButton('pause-menu')}<span>MAIN MENU</span></button>
-      <p class="ir-go">click anywhere to keep going</p>
+      <p class="ir-go">${o.touch ? 'tap' : 'click'} anywhere to keep going</p>
       ${LINKS}
     `, o.onBackdrop);
     panel.querySelector('#btnMenu').addEventListener('click', () => o.onMainMenu());

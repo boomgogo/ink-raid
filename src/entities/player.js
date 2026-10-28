@@ -157,8 +157,9 @@ export class Player {
 
   get onGround() { return this.body.onGround; }
 
-  respawn() {
-    this.body.pos.copy(this.level.startPoint);
+  /** Back on the desk, as new: at `at`, this player's place in the start row (Game.startSpot). */
+  respawn(at = this.level.startPoint) {
+    this.body.pos.copy(at);
     this.body.vel.set(0, 0, 0);
     this.body.riding = null;              // nothing carries you in from the train
     this.maxHp = difficulty.hp;

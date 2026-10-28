@@ -47,19 +47,22 @@ Keyboard and mouse. The keys can't be rebound yet.
   when the tank is empty; it refuels whenever you are not flying, in the air too.
 - **Fighting:** left mouse fires and right mouse aims. R reloads, F swings a quick melee, and 1–5
   or the mouse wheel change weapon.
-- **Grenades:** G throws one. Keep G down longer for a longer throw.
+- **Grenades:** G throws one. Keep G down longer for a longer throw: up to about 12 m thrown
+  level, and 30 m lobbed.
 - **Bandages:** H wraps one, if you have one.
-- **Pausing:** Esc.
+- **Pausing:** Esc. The game also pauses when its page goes out of sight: another tab, another
+  app.
 
 A gamepad works too, and on a touch screen the controls appear on screen:
 
 - **Left thumb:** a stick wherever you put it down; push it far to run.
-- **Right thumb:** drag anywhere on the right to look, and a quick tap there fires once. INK, in
-  the bottom-right corner, holds the trigger and aims as you drag it. DUCK, UP, JET and BLAST sit
+- **Right thumb:** drag anywhere on the right to look. Only the two INK buttons fire. INK, in the
+  bottom-right corner, holds the trigger and aims as you drag it. DUCK, UP, JET and BLAST sit
   round it.
 - **The second INK,** at the top left, only holds the trigger: your left thumb fires while your
   right thumb aims.
-- **Along the top right:** LOAD, NEXT (the next weapon), and WRAP while you carry a bandage.
+- **Along the top right:** LOAD, NEXT (the next weapon), WRAP while you carry a bandage, and
+  PAUSE.
 
 ## Playing with friends
 
@@ -71,12 +74,14 @@ button in the top right corner (on the title, pause and death screens) or PLAY W
 title opens p3p2's panel, with the invite link and a QR code to pass on.
 
 - PLAY starts a run for everybody in the room; whoever is on the title screen then gets JOIN.
+  Everybody starts in a row, 2 m apart, in the order they came into the room.
 - Each player past the first adds half a wave. The host's page runs the figures for everyone.
 - Down is out until the next wave starts. The run is over when everybody is down at once.
 - The desk does not stop for a pause, and there is no friendly fire.
 - If the host leaves, the next player carries on with the same figures and the same wave.
-- You see your friends with the gun they hold, aimed where they look. Their shots leave tracers and
-  marks on the desk, and you hear them. Their katana slashes and their grenades show too.
+- You see your friends holding the same weapon you would, the one in their hands, aimed where they
+  look. Their shots leave tracers and marks on the desk, and you hear them, their steps and their
+  jetpack too. Their katana slashes and their grenades show.
 
 Alone, the game asks no server anything: it loads p3p2's 2 KB entry and nothing more.
 
@@ -95,12 +100,12 @@ the game pauses when its window loses focus.
 | `npm run render` | the renderer: outlines, stroke and stipple patterns, anchoring, inks, the held weapon, phones |
 | `npm run game` | play: weapons, enemies, bosses, waves, pickups, the menu and HUD |
 | `npm run feel` | movement against its numbers: speeds, jumps, slides, crouch |
-| `npm run collide` | what is drawn is what you hit, stand on and shoot |
+| `npm run collide` | what is drawn is what you hit, stand on and shoot, and where the shots that register beside a figure land |
 | `npm run reach` | every place on the map can be walked to, by you and by enemies |
 | `npm run toys` | the pendulum and the cradle move as physics says |
-| `npm run touch` | the touch controls, and p3p2's 👥 button clear of everything on the title and pause screens |
+| `npm run touch` | the touch controls (only INK fires, PAUSE, a pause when the page is hidden), and p3p2's 👥 button clear of everything on the title and pause screens |
 | `npm run perf` | load time and frame times on a throttled desktop and phone |
-| `npm run coop` | co-op in several browsers against a real p3p2 server: the same figures, hits, downs, the host leaving, a reload, a phone, frame times with friends. It starts a server from a p3p2 0.2 checkout (`P3P2_DIR`, default `~/Repos/p3p2`), or uses `P3P2_URL` and `P3P2_PASSWORD` |
+| `npm run coop` | co-op in several browsers against a real p3p2 server: everybody starting apart, the same figures, hits, downs, a friend's gun, shots and steps, the host leaving, a reload, a phone, frame times with friends. It starts a server from a p3p2 0.2 checkout (`P3P2_DIR`, default `~/Repos/p3p2`), or uses `P3P2_URL` and `P3P2_PASSWORD` |
 | `npm run figures` | enemies stay easy to spot from 10 m to 60 m |
 | `npm run shots`, then `node tools/compare.mjs gate shots/stills/*.png` | the look of the page, as numbers |
 | `npm run distcheck` | the build ships the game and nothing else |

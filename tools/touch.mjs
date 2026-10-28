@@ -11,10 +11,11 @@
 // What it CAN tell you, and what has never been checked at all, is whether the
 // controls are wired up: that the layer appears on a coarse pointer, that a
 // drag on the left half moves the player, that a drag on the right half turns
-// the camera WITHOUT firing, that a tap fires, that FIRE holds the trigger and
-// aims while held, that the buttons reach their actions, and that every control
-// meets the 44 px minimum touch target. Those are exactly the things that rot
-// silently, because nothing in `npm run game` touches them.
+// the camera WITHOUT firing, that a tap there does not fire either, that FIRE
+// holds the trigger and aims while held, that the buttons reach their actions,
+// that PAUSE pauses and the page going out of sight does too, and that every
+// control meets the 44 px minimum touch target. Those are exactly the things
+// that rot silently, because nothing in `npm run game` touches them.
 //
 // It also plays a touchscreen LAPTOP, driven by its mouse and a pad: the thumb
 // buttons stay away until the screen is touched, and neither the mouse nor the
@@ -113,8 +114,8 @@ check('touch layer enabled', shown, 'on a coarse pointer, before the run starts'
 
 // --- the layout, on four phones -----------------------------------------------
 // Each in a run, carrying a bandage (so WRAP is up) and the katana (so the blade
-// gauge is): the most there is on the screen at once. Four things that can be
-// checked without a hand:
+// gauge is), with a boss's bar up: the most there is on the screen at once. Four
+// things that can be checked without a hand:
 //
 //   every button clears 44 CSS px, the floor every platform guideline agrees on;
 //   every button is on the screen;
@@ -174,6 +175,9 @@ for (const [w, h] of PHONES) {
     window.__ink.player.damage = () => {};
     G.take('bandage');
     G.selectWeapon(3);
+    // the bar as a boss wave has it, under the longest boss name; nothing else of a boss is needed
+    const show = G.hud.showBoss;
+    G.hud.showBoss = () => show.call(G.hud, 'THE STAPLER', 0.7);
   });
   await sleep(900);
   const r = await lp.evaluate(() => {
@@ -185,7 +189,7 @@ for (const [w, h] of PHONES) {
     const onBox = (c, q) => Math.hypot(c.x - Math.max(q.left, Math.min(c.x, q.right)), c.y - Math.max(q.top, Math.min(c.y, q.bottom))) < c.r;
     // a readout's ink, tightly: each word and each leaf element, not the boxes they sit in
     const ink = [];
-    const sel = ['.ir-top-l', '.ir-top-r', '.ir-feed', '.ir-bl', '.ir-br', '.ir-edge.ir-on', '#hud .ir-version'];
+    const sel = ['.ir-top-l', '.ir-top-r', '.ir-feed', '.ir-bl', '.ir-br', '.ir-edge.ir-on', '.ir-boss.ir-on', '#hud .ir-version'];
     for (const root of document.querySelectorAll(sel.join(','))) {
       if (!shown(root)) continue;
       const walk = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
@@ -218,7 +222,12 @@ for (const [w, h] of PHONES) {
   check(`${at}: no button on a readout`, r.covers.length === 0, r.covers.slice(0, 4).join(', ') || `${r.readouts} bits of the HUD all clear`);
   const inRun = await pillOn(lp);
   check(`${at}: 👥 hidden in a run`, inRun === null, inRun ? `drawn, ${inRun.at}` : 'not drawn');
-  await lp.evaluate(() => window.__ink.game.pause());
+  // to the pause screen the way a thumb gets there: a real tap on PAUSE
+  const pauseAt = await lp.evaluate(() => {
+    const q = document.querySelector('.touch [data-a="pause"]').getBoundingClientRect();
+    return { x: q.left + q.width / 2, y: q.top + q.height / 2 };
+  });
+  await lp.touchscreen.tap(pauseAt.x, pauseAt.y);
   await sleep(300);
   pillCheck(`${at}: 👥 clear on the pause`, await pillOn(lp));
   await lp.screenshot({ path: path.join(root, 'shots', 'stills', `touch-${w}x${h}-pause.png`), scale: 'css' });
@@ -265,12 +274,14 @@ check('look pad turns the camera', Math.abs(yaw1 - yaw0) > 0.15, `yaw ${yaw0.toF
     `${magA - magB} rounds in a 2 s aim, view turned ${Math.abs(yawB - yawA).toFixed(2)} rad`);
 }
 
-// --- a tap fires ------------------------------------------------------------
+// --- a tap on the look pad does not fire ------------------------------------
+// It used to: a touch on the right half that did not travel was a shot, so a
+// thumb put down to start a turn spent a round. Only the two INKs fire now.
 const mag0 = (await state()).mag;
-await tap(300, 500);
-await sleep(400);
+for (const [x, y] of [[300, 500], [250, 300], [340, 640]]) { await tap(x, y); await sleep(150); }
+await sleep(250);
 const mag1 = (await state()).mag;
-check('tap fires the weapon', mag1 < mag0, `mag ${mag0} -> ${mag1}`);
+check('a tap on the look pad', mag1 === mag0, `mag ${mag0} -> ${mag1} after three taps`);
 
 // --- FIRE: hold to keep firing, drag on it to aim while you do ---------------
 {
@@ -422,12 +433,77 @@ if (btnBoxes.reload) {
   }
 }
 
+// --- PAUSE, and the page going out of sight ---------------------------------
+// PAUSE by the way a player does it: a real tap (CDP touch input, from which the
+// browser would make a click if the button let it). The page going out of sight
+// is told by hand: Playwright keeps every page it drives visible (it emulates
+// focus), so another tab brought to the front hides nothing.
+{
+  const pauseAt = await page.evaluate(() => {
+    const r = document.querySelector('.touch [data-a="pause"]').getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  });
+  const st = () => page.evaluate(() => window.__ink.game.state);
+  await page.touchscreen.tap(pauseAt.x, pauseAt.y);
+  await sleep(150);
+  const paused = await st();
+  // the tap that paused must not also count as the tap that resumes
+  await sleep(500);
+  const still = await st();
+  check('PAUSE button', paused === 'paused' && still === 'paused', `${paused}, and ${still} half a second later`);
+  const goAt = await page.evaluate(() => {
+    const r = document.querySelector('#irScreen .ir-go').getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2, text: document.querySelector('#irScreen .ir-go').textContent };
+  });
+  await page.touchscreen.tap(goAt.x, goAt.y);
+  await sleep(300);
+  const back = await st();
+  check('a tap on the sheet resumes', back === 'playing' && goAt.text.startsWith('tap'), `"${goAt.text}": ${back}`);
+
+  // a finger left down on the stick as the page goes away must not walk on afterwards
+  await page.evaluate(() => {
+    const c = document.getElementById('c');
+    const t = new Touch({ identifier: 7, target: c, clientX: 90, clientY: 620 });
+    c.dispatchEvent(new TouchEvent('touchstart', { touches: [t], targetTouches: [t], changedTouches: [t], bubbles: true, cancelable: true }));
+    const m = new Touch({ identifier: 7, target: c, clientX: 90, clientY: 520 });
+    c.dispatchEvent(new TouchEvent('touchmove', { touches: [m], targetTouches: [m], changedTouches: [m], bubbles: true, cancelable: true }));
+  });
+  await sleep(200);
+  const seen = (hidden) => page.evaluate((h) => {
+    if (h) {
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    } else {
+      delete document.hidden;
+      delete document.visibilityState;
+    }
+    document.dispatchEvent(new Event('visibilitychange'));
+  }, hidden);
+  await seen(true);
+  await sleep(300);
+  await seen(false);
+  await sleep(300);
+  const away = await st();
+  check('away from the page pauses', away === 'paused', `came back ${away}`);
+  await page.touchscreen.tap(goAt.x, goAt.y);
+  await sleep(200);
+  const p0 = await probe();
+  await sleep(600);
+  const p1 = await probe();
+  const drift = Math.hypot(p1.pos[0] - p0.pos[0], p1.pos[2] - p0.pos[2]);
+  check('no finger held over a pause', (await st()) === 'playing' && drift < 0.05, `moved ${drift.toFixed(2)} m in 0.6 s after resuming`);
+}
+
 // --- can you actually kill something with a thumb ---------------------------
 // The whole point. Everything above can pass while the game is unplayable.
 // What is under test is the INPUT PATH, not marksmanship: point the camera at
 // something the way a player would, then fire with a thumb and see whether the
 // enemy dies. The first version swept the look pad blindly and hoped, which
-// tests nothing except luck — it failed while tap-to-fire was working.
+// tests nothing except luck. The thumb is on INK: the look pad does not fire.
+const inkAt = await page.evaluate(() => {
+  const r = document.querySelector('.touch [data-fire="aim"]').getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+});
 let killed = false;
 const k0 = (await state()).kills;
 for (let i = 0; i < 40 && !killed; i++) {
@@ -445,14 +521,14 @@ for (let i = 0; i < 40 && !killed; i++) {
     p.yaw = Math.atan2(-dx, -dz);
     p.pitch = Math.asin(dy / Math.hypot(dx, dy, dz));
   });
-  await tap(300, 470, 80);
+  await tap(inkAt.x, inkAt.y, 80);
   await sleep(180);
   if ((await state()).kills > k0) killed = true;
 }
 {
   const st = await state();
-  check('a kill by touch alone', killed, killed ? 'tap-to-fire killed one'
-    : `no kill in 40 taps (state ${st.state}, hp ${st.hp}, ${st.alive} alive, mag ${st.mag})`);
+  check('a kill by touch alone', killed, killed ? 'a tap on INK killed one'
+    : `no kill in 40 taps on INK (state ${st.state}, hp ${st.hp}, ${st.alive} alive, mag ${st.mag})`);
 }
 
 await page.screenshot({ path: path.join(root, 'shots', 'stills', 'touch-game.png'), scale: 'css' });
@@ -554,10 +630,9 @@ console.log(`
 Still needs a human with a phone — none of the above can answer these:
   [ ] can you reach UP and JET without regripping?
   [ ] can you reach the left INK without letting go of the phone, and aim with the right thumb while you hold it?
-  [ ] are LOAD, NEXT and WRAP, along the top, where you can reach them when you need them?
+  [ ] are LOAD, NEXT, WRAP and PAUSE, along the top, where you can reach them when you need them?
   [ ] does the floating stick appear under your thumb, or somewhere you have to reach for?
   [ ] is look sensitivity right, and can you make a small correction?
-  [ ] does tap-to-fire misfire while you are turning?
   [ ] can you reach FIRE, and still see what you are shooting at while you hold it?
   [ ] does anything important sit under the notch or the home indicator?
   [ ] does your thumb cover the thing you are shooting at?

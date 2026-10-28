@@ -16,6 +16,28 @@ import { clamp } from '../core/spring.js';
 const MAX_PARTICLES = 420;
 const MAX_TRACERS = 48;
 const MAX_DECALS = 140;
+// Grenades going off at once, each drawn whole (BLAST), and the scorches they leave.
+const MAX_BLASTS = 4;
+const MAX_SCORCHES = 8;
+
+// A grenade going off, in the order it is seen: seconds, and metres.
+//
+//   flash   a star of uneven orange spikes round a black one, turned to the camera, as wide as
+//           `size` by `grow`, gone by `life`
+//   ring    a band round the blast that grows to its radius by `grow`, thinning from `height`
+//           to nothing by `life`: how far it reached, which matters as much as how it looks
+//   smoke   puffs, hatched and outlined like anything else on the page, that swell to between
+//           `small` and `big` across by `swell`, rise, and shrink away by `life`
+//   sparks, chunks   strokes thrown out: quick orange ones, then heavier black ones that fall
+//   scorch  a splat on what it went off on, `scorch` across
+export const BLAST = {
+  flash: { grow: 0.06, life: 0.22, size: 2.4 },
+  ring: { grow: 0.18, life: 0.3, height: 0.6 },
+  smoke: { puffs: 7, swell: 0.35, life: 1.4, rise: 1.5, small: 0.6, big: 1.1, spread: 1.2 },
+  sparks: 18,
+  chunks: 24,
+  scorch: 3.5,
+};
 
 const _v = new THREE.Vector3();
 const _q = new THREE.Quaternion();
@@ -54,6 +76,20 @@ export class Effects {
     // seen from either side: a blot on a thin thing shows through
     this.dMesh = instanced(dg, MAX_DECALS, INK.PEN, THREE.DoubleSide);
     ctx.scene.add(this.dMesh);
+
+    // grenades going off (blast): what is drawn of each, and the splats they leave
+    this.blasts = [];
+    this.blasted = 0;
+    this.scorches = [];
+    this.scorchHead = 0;
+    this.flashMesh = instanced(star(9, 0.38, 0.6, 1), MAX_BLASTS * 2, INK.ORANGE, THREE.DoubleSide);
+    this.ringMesh = instanced(new THREE.CylinderGeometry(1, 1, 1, 40, 1, true), MAX_BLASTS, INK.PEN, THREE.DoubleSide);
+    this.smokeMesh = instanced(new THREE.SphereGeometry(1, 9, 6), MAX_BLASTS * BLAST.smoke.puffs);
+    this.sMesh = instanced(star(14, 0.3, 0.38, 0.5), MAX_SCORCHES, INK.BLACK, THREE.DoubleSide);
+    for (const m of [this.flashMesh, this.ringMesh, this.smokeMesh, this.sMesh]) {
+      m.visible = false;
+      ctx.scene.add(m);
+    }
   }
 
   // --- spawning -------------------------------------------------------------
@@ -114,7 +150,9 @@ export class Effects {
    * would hang in the air once the train had gone.
    */
   decal(pos, normal, o = {}) {
-    const d = this.decals[this.decalHead] || {};
+    const list = o.scorch ? this.scorches : this.decals;
+    const head = o.scorch ? this.scorchHead : this.decalHead;
+    const d = list[head] || {};
     d.pos = (d.pos || new THREE.Vector3()).copy(pos).addScaledVector(normal, 0.02);
     d.normal = (d.normal || new THREE.Vector3()).copy(normal);
     d.mover = o.mover || null;
@@ -127,8 +165,32 @@ export class Effects {
     d.ink = o.ink ?? INK.PEN;
     d.born = this.time;
     d.rot = Math.random() * Math.PI;
-    this.decals[this.decalHead] = d;
-    this.decalHead = (this.decalHead + 1) % MAX_DECALS;
+    list[head] = d;
+    if (o.scorch) this.scorchHead = (head + 1) % MAX_SCORCHES;
+    else this.decalHead = (head + 1) % MAX_DECALS;
+  }
+
+  /**
+   * A grenade going off at `pos`, its blast `radius` across (see BLAST). `ground` is what it lay
+   * on (a raycast hit: point, normal, the mover it is on), for the scorch, or null if it went off
+   * in the air. All of it is drawn here, on every page that sees it.
+   */
+  blast(pos, radius, ground = null) {
+    if (this.blasts.length >= MAX_BLASTS) this.blasts.shift();
+    const S = BLAST.smoke;
+    const puffs = [];
+    for (let i = 0; i < S.puffs; i++) {
+      puffs.push({
+        off: rand3().clone().multiplyScalar(S.spread * (0.3 + 0.7 * Math.random())).setY(Math.random() * 0.6),
+        r: (S.small + (S.big - S.small) * Math.random()) / 2,
+        rise: S.rise * (0.6 + 0.6 * Math.random()),
+      });
+    }
+    this.blasts.push({ pos: pos.clone(), radius, t: 0, rot: Math.random() * Math.PI, puffs });
+    this.blasted++;
+    this.burst(pos, _up, BLAST.sparks, { speed: 18, spread: 1.6, size: 0.06, life: 0.25, ink: INK.ORANGE, gravity: 4, drag: 3, stretch: 0.25 });
+    this.burst(pos, _up, BLAST.chunks, { speed: 11, spread: 1.3, size: 0.1, life: 0.8, ink: INK.BLACK, gravity: 22, drag: 1.2, stretch: 0.08 });
+    if (ground) this.decal(ground.point, ground.normal, { size: BLAST.scorch, ink: INK.BLACK, mover: ground.box?.mover, scorch: true });
   }
 
   /** Bullet hits a surface: a blot, a few strokes, a puff of dust. */
@@ -203,6 +265,21 @@ export class Effects {
       d.normal.copy(d.lnormal).transformDirection(d.mover.matrix);
     }
     writeDecals(this.dMesh, this.decals, this.time);
+
+    // the blasts: theirs on game time, as the strokes they throw are
+    const bs = this.blasts;
+    for (let i = bs.length - 1; i >= 0; i--) {
+      bs[i].t += dt;
+      if (bs[i].t > BLAST.smoke.life) bs.splice(i, 1);
+    }
+    writeBlasts(this, this.ctx.camera);
+    for (const d of this.scorches) {
+      if (!d.mover) continue;
+      d.pos.copy(d.lpos).applyMatrix4(d.mover.matrix);
+      d.normal.copy(d.lnormal).transformDirection(d.mover.matrix);
+    }
+    writeDecals(this.sMesh, this.scorches, this.time);
+    this.sMesh.visible = this.sMesh.count > 0;
 
     // screen shake decays fast; a long shake reads as a bug, not as impact
     this.shake = Math.max(0, this.shake - realDt * 4.2);
@@ -299,6 +376,77 @@ function writeDecals(mesh, ds, time) {
 
 const _tmpQ = new THREE.Quaternion();
 function _qz(a) { return _tmpQ.setFromAxisAngle(UNIT_Z, a); }
+
+/**
+ * A flat star facing +z, `points` spikes reaching between `inner` and an uneven `outer`..`tip`:
+ * a blast's flash, or the splat it leaves. Its unevenness is fixed, so every one is the same
+ * star, turned a different way.
+ */
+function star(points, inner, outer, tip) {
+  const pos = [];
+  const at = (a, r) => [Math.cos(a) * r, Math.sin(a) * r, 0];
+  for (let i = 0; i < points; i++) {
+    const a0 = (i / points) * Math.PI * 2, a1 = ((i + 0.5) / points) * Math.PI * 2, a2 = ((i + 1) / points) * Math.PI * 2;
+    const reach = outer + (tip - outer) * (0.5 + 0.5 * Math.sin(i * 2.7 + 1.3));
+    pos.push(0, 0, 0, ...at(a0, inner), ...at(a1, reach), 0, 0, 0, ...at(a1, reach), ...at(a2, inner));
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.computeVertexNormals();
+  return g;
+}
+
+const ease = (u) => 1 - (1 - u) * (1 - u);
+const _bq = new THREE.Quaternion();
+const _bp = new THREE.Vector3();
+const _fp = new THREE.Vector3();
+
+/** Every blast's flash, ring and smoke, as instances; a mesh with none is not drawn at all. */
+function writeBlasts(fx, camera) {
+  const F = BLAST.flash, R = BLAST.ring, S = BLAST.smoke;
+  let nf = 0, nr = 0, ns = 0;
+  for (const b of fx.blasts) {
+    const t = b.t;
+    if (t < F.life) {
+      // out fast, then gone: an orange star, and a black one a third smaller just in front of it
+      const s = (F.size / 2) * Math.min(1, t / F.grow) * (1 - clamp((t - F.grow) / (F.life - F.grow), 0, 1) * 0.6);
+      // centred a little above the grenade, which lies on the floor, or half the star is under it
+      _bq.copy(camera.quaternion).multiply(_qz(b.rot));
+      _fp.copy(b.pos).y += F.size * 0.15;
+      _bp.copy(camera.position).sub(_fp).normalize().multiplyScalar(0.05).add(_fp);
+      for (const [ink, k, p] of [[INK.ORANGE, 1, _fp], [INK.BLACK, 0.62, _bp]]) {
+        _s.setScalar(s * k);
+        _m.compose(p, _bq, _s);
+        fx.flashMesh.setMatrixAt(nf, _m);
+        fx.flashMesh.instanceColor.setXYZ(nf++, ink, LOOK.SOLID, 1);
+      }
+    }
+    if (t < R.life) {
+      const r = b.radius * ease(Math.min(1, t / R.grow));
+      _s.set(r, R.height * (1 - t / R.life), r);
+      _m.compose(b.pos, _bq.identity(), _s);
+      fx.ringMesh.setMatrixAt(nr, _m);
+      fx.ringMesh.instanceColor.setXYZ(nr++, INK.PEN, LOOK.LINE, 1);
+    }
+    const k = t / S.life;
+    const swell = Math.min(1, t / S.swell);
+    const shrink = 1 - clamp((k - 0.5) / 0.5, 0, 1);
+    for (const p of b.puffs) {
+      _bp.copy(p.off).multiplyScalar(0.3 + 0.7 * ease(swell)).add(b.pos);
+      _bp.y += p.rise * ease(k);
+      _s.setScalar(Math.max(1e-3, p.r * ease(swell) * shrink * shrink));
+      _m.compose(_bp, _bq.identity(), _s);
+      fx.smokeMesh.setMatrixAt(ns, _m);
+      fx.smokeMesh.instanceColor.setXYZ(ns++, INK.PEN, LOOK.LINE, 1);
+    }
+  }
+  for (const [m, n] of [[fx.flashMesh, nf], [fx.ringMesh, nr], [fx.smokeMesh, ns]]) {
+    m.count = n;
+    m.visible = n > 0;
+    m.instanceMatrix.needsUpdate = true;
+    m.instanceColor.needsUpdate = true;
+  }
+}
 
 const _r = new THREE.Vector3();
 function rand3() {

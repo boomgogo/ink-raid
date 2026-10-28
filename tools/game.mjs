@@ -1265,6 +1265,101 @@ const na = (await g()).nades;
 check('grenade throws', na === nb - 1, `${nb} -> ${na}`);
 await sleep(2200);
 
+// A full throw, level, from standing on open ground: where it first lands. GRENADE.throw works it
+// out as 11.9 m on flat ground from a 1.6 m eye, and 10.7 m before the throw went further.
+{
+  const setUp = await page.evaluate(() => {
+    const I = window.__ink, G = I.game, p = G.ctx.player, V = p.eye.constructor;
+    for (const q of G.ctx.level.spawnPool) {
+      for (let y = 0; y < Math.PI * 2; y += Math.PI / 8) {
+        const d = new V(-Math.sin(y), 0, -Math.cos(y));
+        const clear = [0.4, 1.0, 1.9].every((h) => !I.raycastLevel(new V(q.x, q.y + h, q.z), d, 18));
+        const floor = (k) => I.raycastLevel(new V(q.x + d.x * k, q.y + 1, q.z + d.z * k), new V(0, -1, 0), 1.5)?.point.y;
+        const under = floor(0);
+        const flat = under !== undefined && [4, 8, 12, 16].every((k) => Math.abs((floor(k) ?? 1e9) - under) < 0.05);
+        if (clear && flat) {
+          I.teleport(q.x, q.y + 0.1, q.z);
+          I.face(y, 0);
+          return true;
+        }
+      }
+    }
+    return false;
+  });
+  await sleep(400);
+  await page.evaluate(() => {
+    const G = window.__ink.game;
+    G.grenades.count = 3;
+    // the first bounce: the frame the grenade's fall turns into a rise
+    window.__landed = null;
+    const from = G.ctx.player.eye.clone();
+    const watch = () => {
+      const n = G.grenades.live[0];
+      if (!n) return requestAnimationFrame(watch);
+      if (n.vel.y > 0 && n.wasFalling) { window.__landed = Math.hypot(n.pos.x - from.x, n.pos.z - from.z); return; }
+      n.wasFalling = n.vel.y < 0;
+      requestAnimationFrame(watch);
+    };
+    requestAnimationFrame(watch);
+  });
+  await hold(['grenade']);
+  await sleep(1100);
+  await release(['grenade']);
+  await sleep(1200);
+  const landed = await page.evaluate(() => window.__landed);
+  check('a full throw lands further', setUp && landed >= 11.2, setUp ? `first lands ${landed?.toFixed(1)} m out (at least 11.2: the old throw's was 10.7)` : 'no open ground found to throw along');
+  await sleep(1500);
+}
+
+// The last figure is a sniper on a nest, and no nest can see the player: the scene the bot's
+// run stalled in (ai/next_3.md). It comes down off its nest and searches, and is found. As the
+// scene starts 34 s into the wait for contact, it starts with one look for a nest already failed;
+// the second, and coming down, are the game's own.
+{
+  await page.evaluate(() => {
+    const I = window.__ink, G = I.game, E = G.ctx.enemies, V = G.ctx.player.eye.constructor;
+    window.__wavesUpdate = G.waves.update;
+    G.waves.update = () => {};
+    E.clear();
+    window.__hurt = G.ctx.player.damage;
+    G.ctx.player.damage = () => {};
+    I.teleport(-25.4, 0.1, 5.1);
+    window.__liner = E.spawn('liner', new V(0, 15.6, -31));
+    window.__liner.nestless = 1;
+    E.contactT = 34;
+  });
+  await sleep(300);
+  const blind = await page.evaluate(() => {
+    const I = window.__ink, G = I.game, p = G.ctx.player, V = p.eye.constructor;
+    return G.ctx.level.snipers.every((n) => {
+      const o = new V(n.x, n.y + 1.5, n.z), d = p.center.clone().sub(o), len = d.length();
+      return !!I.raycastLevel(o, d.normalize(), len - 0.5);
+    });
+  });
+  let found = null;
+  const t0 = Date.now();
+  while (Date.now() - t0 < 120000 && !found) {
+    await sleep(1000);
+    found = await page.evaluate(() => {
+      const I = window.__ink, e = window.__liner, p = I.game.ctx.player;
+      if (!e.alive || !e.afoot) return null;
+      const d = e.center.clone().sub(p.eye), len = d.length();
+      const seen = !I.raycastLevel(p.eye.clone(), d.normalize(), len - 0.3);
+      return seen || e.mind === 'hunt' ? { seen, mind: e.mind, len: +len.toFixed(1) } : null;
+    });
+  }
+  check('the last sniper comes down', blind && !!found,
+    `${blind ? 'no nest sees the player' : 'A NEST SEES THE PLAYER: not the case under test'}; ${found ? `down and ${found.seen ? 'in sight' : 'hunting'} ${found.len} m off after ${Math.round((Date.now() - t0) / 1000)} s` : 'still not found after 120 s'}`);
+  await page.evaluate(() => {
+    const I = window.__ink, G = I.game, s = G.ctx.level.startPoint;
+    G.ctx.enemies.clear();
+    G.waves.update = window.__wavesUpdate;
+    G.ctx.player.damage = window.__hurt;
+    I.teleport(s.x, s.y, s.z);
+  });
+  await sleep(300);
+}
+
 // --- waves advance ----------------------------------------------------------
 // Kill everything repeatedly and check the wave counter moves.
 const w0 = (await g()).wave;

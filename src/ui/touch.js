@@ -2,9 +2,13 @@
 //
 // The project spec requires entry level phones and touch devices. The layout is the one that works on a phone
 // without a tutorial: left thumb drives a floating stick that appears wherever
-// you first press, right thumb is a look-pad anywhere on the right half, and a
-// short tap on the right half is a shot. Holding fire is its own button, INK,
-// in the bottom-right corner, with what else a fight needs on an arc round it.
+// you first press, right thumb is a look-pad anywhere on the right half. Only
+// the two INK buttons shoot: the trigger is INK, in the bottom-right corner,
+// with what else a fight needs on an arc round it.
+//
+// A quick tap on the look pad was once a shot as well. Every touch on the right
+// half that did not travel fired, so a thumb put down to start a turn spent a
+// round, and the look pad could not be touched without shooting.
 //
 // It writes the same named-action state the keyboard uses, and its own trigger
 // flag (`input.fireBy.touch`), so nothing downstream knows or cares which device
@@ -14,8 +18,9 @@
 //
 // The right thumb rests on INK. DUCK, UP, JET and BLAST sit on an arc round it,
 // evenly spaced, so none is a stretch past another; JET is next to UP, as you
-// jump and then fly. The ones pressed now and then (LOAD, NEXT, WRAP) are a row
-// of small ones along the top edge, where they take nothing from the look pad.
+// jump and then fly. The ones pressed now and then (LOAD, NEXT, WRAP, PAUSE) are
+// a row of small ones along the top edge, where they take nothing from the look
+// pad.
 // All eight were once in the bottom-right corner, and in a landscape phone they
 // filled 80% of its height and sat on the weapon's name and slot list.
 //
@@ -33,10 +38,13 @@ const ON_ARC = [
 ];
 // From the top-right corner leftwards, at the 44 px floor tools/touch.mjs checks.
 const ROW = { right: 14, top: 10, size: 44, gap: 8 };
+// PAUSE keeps its place at the left end while WRAP is away, so a thumb learns
+// where it is. It presses the same `pause` action Esc and a pad's start button do.
 const ON_ROW = [
   { a: 'reload', label: 'LOAD' },
   { swap: true, label: 'NEXT' },
   { a: 'heal', label: 'WRAP', cls: 'theal' },      // only while you carry a bandage
+  { a: 'pause', label: 'PAUSE' },
 ];
 // Under the score (hud.css moves the blade gauge clear of it).
 const LEFT_INK = { left: 16, top: 84, size: 76 };
@@ -64,12 +72,8 @@ function button(b, at, small = false) {
 
 // Look speed, in mouse pixels per screen pixel of thumb travel.
 const LOOK_GAIN = 1.6;
-// A touch on the look pad that ends inside both of these is a tap, and a tap is
-// one shot.
-const TAP_MS = 250;
-const TAP_TRAVEL = 14;
-// How long one tap holds the trigger. Long enough to be seen by the next frame
-// at any frame rate the game supports.
+// How long a tap on INK holds the trigger. Long enough to be seen by the next
+// frame at any frame rate the game supports.
 const PULSE_MS = 110;
 
 export class TouchControls {
@@ -101,10 +105,13 @@ export class TouchControls {
     this.triggers = { aim: { id: null, x: 0, y: 0 }, hold: { id: null, x: 0, y: 0 } };
     this.origin = { x: 0, y: 0 };
     this.lookLast = { x: 0, y: 0 };
-    this.lookMoved = 0;
-    this.lookStart = 0;
     this.fireUntil = 0;
     this.onSwap = null;
+    // A button's action is held until a whole frame has seen it (see update): `frame` counts the
+    // frames, `_at` is the one each action was pressed on, `_late` the ones let go too soon.
+    this.frame = 0;
+    this._at = {};
+    this._late = new Map();
 
     this._bind();
   }
@@ -158,6 +165,7 @@ export class TouchControls {
     }
     this.input.fireBy.touch = false;
     this.fireUntil = 0;
+    this._late.clear();
     this.moveId = this.lookId = this.triggers.aim.id = this.triggers.hold.id = null;
     this.knob.style.transform = '';
     this.stick.classList.remove('on');
@@ -174,11 +182,14 @@ export class TouchControls {
         btn.classList.add('down');
         if (fire) { this._fireDown(e, fire); return; }
         this.input.state[act] = true;
+        this._at[act] = this.frame;
+        this._late.delete(act);
       };
       const release = (e) => {
         e.preventDefault();
         e.stopPropagation();
         if (fire && !this._fireUp(e, fire)) return;
+        if (act && this.frame - this._at[act] < 2) { this._late.set(act, btn); return; }
         if (act) this.input.state[act] = false;
         btn.classList.remove('down');
       };
@@ -219,8 +230,6 @@ export class TouchControls {
           this.lookId = t.identifier;
           this.lookLast.x = t.clientX;
           this.lookLast.y = t.clientY;
-          this.lookMoved = 0;
-          this.lookStart = performance.now();
           this.input.note('touch look down');
         }
       }
@@ -249,7 +258,6 @@ export class TouchControls {
           const dy = t.clientY - this.lookLast.y;
           this.lookLast.x = t.clientX;
           this.lookLast.y = t.clientY;
-          this.lookMoved += Math.abs(dx) + Math.abs(dy);
           // feed the same accumulator the mouse writes to
           this.input.mouse.dx += dx * LOOK_GAIN;
           this.input.mouse.dy += dy * LOOK_GAIN;
@@ -267,13 +275,8 @@ export class TouchControls {
           const s = this.input.state;
           s.forward = s.back = s.left = s.right = s.sprint = false;
         } else if (t.identifier === this.lookId) {
-          // A tap that did not travel is a shot; a drag is aiming, and ONLY
-          // aiming. A deadline, not a timeout that pokes the flag directly:
-          // update() runs every frame and owns it.
-          const held = performance.now() - this.lookStart;
-          const quick = held < TAP_MS && this.lookMoved < TAP_TRAVEL;
-          if (quick) this.fireUntil = performance.now() + PULSE_MS;
-          this.input.note(`touch look up after ${Math.round(held)} ms${quick ? ' (tap: fire)' : ''}`);
+          // the look pad only looks: a tap there is not a shot
+          this.input.note('touch look up');
           this.lookId = null;
         }
       }
@@ -321,7 +324,7 @@ export class TouchControls {
   }
 
   /**
-   * The touch layer's trigger: either INK held, or the tail of a tap.
+   * The touch layer's trigger: either INK held, or the tail of a tap on one.
    *
    * This used to also fire whenever the look-pad touch had been down for more
    * than 260 ms, meant for "holding the right thumb still". Nothing checked
@@ -330,6 +333,18 @@ export class TouchControls {
    * because its look drag was 220 ms long.
    */
   update() {
+    // A tap can start and end between two frames: a quick one on a slow phone, or any tap from
+    // a test's touch input, which sends both at once. Let go at once, it was never held for the
+    // game to see, and PAUSE, read before this runs, would never pause. So a button let go
+    // before two of these calls have passed stays held until they have: the frame it was
+    // pressed in sees it whatever reads it, before this call or after.
+    this.frame++;
+    for (const [act, btn] of this._late) {
+      if (this.frame - this._at[act] < 2) continue;
+      this._late.delete(act);
+      this.input.state[act] = false;
+      btn.classList.remove('down');
+    }
     if (!this.enabled) { this.input.fireBy.touch = false; return; }
     this.input.fireBy.touch = this.firing() || performance.now() < this.fireUntil;
   }

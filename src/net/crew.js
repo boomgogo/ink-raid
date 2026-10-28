@@ -3,7 +3,7 @@ import { Smooth } from '@p3p2/client/smooth';
 import { buildFigure, pose } from '../entities/enemies/rig.js';
 import { stanceOf } from '../entities/enemies/manager.js';
 import { MOVE } from '../entities/player.js';
-import { jetPuffs } from '../entities/jetpack.js';
+import { jetPuffs, JET } from '../entities/jetpack.js';
 import { INK } from '../render/palette.js';
 import { raycast } from '../core/physics.js';
 import { Reader, Writer, ENDED, num } from './wire.js';
@@ -39,11 +39,11 @@ import { Reader, Writer, ENDED, num } from './wire.js';
 export const STANCES = ['still', 'walk', 'sprint', 'crouch', 'crouchWalk'];
 const SPRINT = STANCES.indexOf('sprint');
 const FRIEND_INKS = [INK.BLUE, INK.GREEN];
-/** Each weapon a player can hold, and the prop a friend's figure holds for it. */
-export const HELD = { rifle: 'rifle', shotgun: 'shotgun', sniper: 'sniper', katana: 'katana', stapler: 'staples' };
+/** Each weapon a player can hold: a friend's figure holds the same model of it (rig.js). */
+export const HELD = ['rifle', 'shotgun', 'sniper', 'katana', 'stapler'];
 // The horde's figures all wear a hat: a friend wears none, so the two differ by shape as well as by ink.
 export const FRIEND = {
-  look: { hat: 'none', props: Object.values(HELD) },
+  look: { hat: 'none', props: HELD },
   frame: { scale: 1, girth: 1, headSize: 1, limbThickness: 0.035 },
 };
 /** What a batch of `pf` names: a shot from each gun, then a slash and a throw. */
@@ -55,10 +55,14 @@ const PF_SECONDS = 0.05;
 const PF_MOST = 32;
 /** A friend's shot is drawn this long after it comes, ms: Smooth's own delay, so the gun fires as it is drawn. */
 const PLAYBACK_MS = 120;
-/** Where each prop's muzzle is, metres along its grip (entities/enemies/rig.js addProp). */
-const MUZZLE = { rifle: 0.62, shotgun: 0.52, sniper: 1.1, staples: 0.45 };
 /** A friend's shots are heard to this far, metres, quieter on the way: as the host's figures' are. */
 const HEARD = 60;
+/**
+ * A friend's steps are heard to `steps` metres and their jet's hiss to `jet`, quieter on the way,
+ * from the nearest `stepping` and `hissing` of them only: five friends flying at once would be
+ * sixty voices a second on a phone. A step is taken over `fast` m/s, as your own are (Player).
+ */
+const HEARD_MOVING = { steps: 20, jet: 40, stepping: 3, hissing: 2, fast: 1.5 };
 const r2 = (v) => Math.round(v * 100) / 100;
 const r3 = (v) => Math.round(v * 1000) / 1000;
 const _v = new THREE.Vector3();
@@ -88,6 +92,7 @@ export class Crew {
     hud.appendChild(this.tags);
     this._said = {};
     this._offs = [];
+    this._order = [];
     // what this page's player did since the last batch went
     this.out = new Writer(512).u8(0);
     this.outN = 0;
@@ -260,7 +265,11 @@ export class Crew {
     // `pack`: where their jetpack is, for its puffs, and how fast it goes
     const pack = { pos: new THREE.Vector3(), vel: new THREE.Vector3(), puff: 0, seen: false };
     // `fire`: their shots, slashes and throws, waiting to be drawn; `slashT`: a slash under way
-    return { member, fig, tag, proxy, said: null, phase: Math.random() * 10, downFor: 0, pack, held: null, fire: [], slashT: 0 };
+    // `dist`, `rank`: how far, and how near among the others, for what of theirs is heard
+    return {
+      member, fig, tag, proxy, said: null, phase: Math.random() * 10, downFor: 0, pack, held: null, fire: [], slashT: 0,
+      stride: 0, hiss: 0, dist: Infinity, rank: 0,
+    };
   }
 
   forget(id) {
@@ -311,25 +320,43 @@ export class Crew {
         mate.tag.style.display = 'none';
         mate.fire.length = 0;
         mate.slashT = 0;
+        mate.dist = Infinity;
         continue;
       }
       fig.root.position.set(at[0], at[1], at[2]);
       fig.root.rotation.y = at[3];
       const alive = said.a === 1;
-      // their jetpack: the same puffs as your own, and no hiss (their steps are not heard either)
+      // their jetpack: the same puffs as your own, and its hiss if they are among the nearest
       const pack = mate.pack;
       if (dt > 0 && pack.seen) pack.vel.set(at[0], at[1], at[2]).sub(pack.pos).multiplyScalar(1 / dt);
       pack.pos.set(at[0], at[1], at[2]);
       pack.seen = true;
-      if (alive && said.j === 1) pack.puff = jetPuffs(this.ctx.effects, pack, at[3], dt, pack.puff);
+      mate.dist = fig.root.position.distanceTo(cam.position);
+      const burning = alive && said.j === 1;
+      if (burning) pack.puff = jetPuffs(this.ctx.effects, pack, at[3], dt, pack.puff);
+      mate.hiss -= dt;
+      if (burning && mate.hiss <= 0) {
+        mate.hiss = JET.hissEvery;
+        if (mate.rank < HEARD_MOVING.hissing) this.ctx.audio?.jet(1 - mate.dist / HEARD_MOVING.jet);
+      }
       mate.downFor = alive ? 0 : mate.downFor + dt;
-      const walk = Math.min(1, num(said.v) / MOVE.walkSpeed);
+      const speed = num(said.v);
+      const walk = Math.min(1, speed / MOVE.walkSpeed);
       mate.phase += dt * (0.4 + walk);
+      // Their steps, each time the drawn legs cross (pose swings them on the same phase), while
+      // they are on the ground: not burning, and not rising or falling faster than a stride.
+      const stride = Math.floor((mate.phase * 9) / Math.PI);
+      if (stride !== mate.stride) {
+        mate.stride = stride;
+        if (alive && !burning && speed > HEARD_MOVING.fast && Math.abs(pack.vel.y) < 1.5 && mate.rank < HEARD_MOVING.stepping) {
+          this.ctx.audio?.step(speed, 1 - mate.dist / HEARD_MOVING.steps);
+        }
+      }
       // the weapon in their hands, and only that one
-      const held = HELD[said.w] ? said.w : 'rifle';
+      const held = HELD.includes(said.w) ? said.w : 'rifle';
       if (mate.held !== held) {
         mate.held = held;
-        for (const kind in fig.props) fig.props[kind].visible = kind === HELD[held];
+        for (const kind in fig.props) fig.props[kind].visible = kind === held;
       }
       // A gun is up and aimed where they look, unless they sprint; the katana is carried.
       // Crouched, they are lower and bent forward at the hips.
@@ -357,6 +384,12 @@ export class Crew {
         mate.tag.classList.toggle('ir-tag-down', !alive);
       }
     }
+    // nearest first, for which of them are heard next frame
+    const order = this._order;
+    order.length = 0;
+    for (const mate of this.mates.values()) order.push(mate);
+    order.sort((a, b) => a.dist - b.dist);
+    for (let i = 0; i < order.length; i++) order[i].rank = i;
   }
 
   /** What a friend's weapons did, now that the figure is drawn doing it. */
@@ -380,7 +413,7 @@ export class Crew {
         continue;
       }
       // A shot: out of the gun as it is drawn, to where each round ended on their page.
-      _muzzle.set(0, 0, -(MUZZLE[HELD[ev.key]] || 0.6)).applyMatrix4(grip.matrixWorld);
+      _muzzle.copy(mate.fig.props[ev.key].userData.muzzle).applyMatrix4(grip.matrixWorld);
       _d.set(0, 0, -1).transformDirection(grip.matrixWorld);
       fx.burst(_muzzle, _d, ev.ends.length > 1 ? 5 : 2, { speed: 3, size: 0.03, life: 0.1, ink: INK.ORANGE });
       for (const [x, y, z, ended] of ev.ends) {

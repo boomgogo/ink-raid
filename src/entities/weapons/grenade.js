@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { surface } from '../../render/surface.js';
 import { INK, LOOK } from '../../render/palette.js';
 import { raycast } from '../../core/physics.js';
+import { grenadeGeometry } from './models.js';
 
 // Grenades. Hold to cook and throw further, which is the whole decision: a
 // short lob into cover, or a long throw that gives them time to walk out of it.
@@ -27,9 +28,17 @@ export const GRENADE = {
     toyFrac: 0.1,
     toyReach: 1.5,         // toys inside 1.5x the blast radius get shoved
   },
+  // Speeds, m/s, plus a 2.6 m/s lift and 0.4 of your own speed. Where it first lands on flat
+  // ground, thrown from the eye (1.6 m) under the grenade's own 32 m/s² gravity (fly):
+  //
+  //              level    20° up   the furthest (41°)
+  //   min  8.5   4.0 m    4.8 m     5.0 m: a quick tap drops it inside its own blast
+  //   max   28  11.9 m   23.8 m    29.9 m: was 25 (10.7, 20.0, 24.6 m), "a little further"
+  //
+  // The longest is 1.4 s in the air, well inside the fuse.
   throw: {
-    min: 8.5,              // mid the 7-10 m short-lob target
-    max: 25,                // "about 25 m" target
+    min: 8.5,
+    max: 28,
     chargeTime: 0.85,       // mid the 0.7-1.0 s target
   },
   // unpinned: wide enough to be heard well past the blast itself
@@ -38,6 +47,9 @@ export const GRENADE = {
 
 const _v = new THREE.Vector3();
 const _d = new THREE.Vector3();
+const _q = new THREE.Quaternion();
+const ONE = new THREE.Vector3(1, 1, 1);
+const DOWN = new THREE.Vector3(0, -1, 0);
 /** How far off a friend's blast is still heard, metres: as far as the figures' own shots are. */
 const HEARD = 60;
 
@@ -53,13 +65,26 @@ export class Grenades {
     // a friend's, on their way (net/crew.js): drawn, and harmless
     this.shown = [];
 
-    const geo = new THREE.SphereGeometry(0.18, 8, 6);
-    this.mesh = new THREE.InstancedMesh(geo, surface({ ink: INK.BLACK, look: LOOK.SOLID }), 8);
-    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    this.mesh.frustumCulled = false;
-    this.mesh.count = 0;
-    ctx.scene.add(this.mesh);
+    // The grenade in the air: a green body and its black fittings (weapons/models.js), eight at
+    // most, tumbling as they fly.
+    const geo = grenadeGeometry();
+    this.meshes = [
+      new THREE.InstancedMesh(geo.body, surface({ ink: INK.GREEN, look: LOOK.WASH }), 8),
+      new THREE.InstancedMesh(geo.fittings, surface({ ink: INK.BLACK, look: LOOK.SOLID }), 8),
+    ];
+    for (const m of this.meshes) {
+      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      m.frustumCulled = false;
+      m.count = 0;
+      ctx.scene.add(m);
+    }
     this._m = new THREE.Matrix4();
+  }
+
+  /** None in the air: a run left behind. */
+  clear() {
+    this.live.length = 0;
+    this.place();
   }
 
   update(dt, input) {
@@ -87,7 +112,7 @@ export class Grenades {
    * only drawn. Their page did the real blast, and sent what it hit to whoever runs the figures.
    */
   show(pos, vel) {
-    this.shown.push({ pos, vel, fuse: GRENADE.fuse });
+    this.shown.push(spinning({ pos, vel, fuse: GRENADE.fuse }));
   }
 
   /** In a room, every frame, whatever this page is doing: the friends' grenades. */
@@ -111,10 +136,12 @@ export class Grenades {
           g.pos.copy(hit.point).addScaledVector(hit.normal, 0.19);
           const along = g.vel.dot(hit.normal);
           g.vel.addScaledVector(hit.normal, -2 * along).multiplyScalar(0.38);
+          g.spin *= 0.5;
         } else {
           g.pos.add(_v);
         }
       }
+      g.rot.premultiply(_q.setFromAxisAngle(g.axis, g.spin * dt));
       if (g.pos.y < this.ctx.level.killY) { list.splice(i, 1); continue; }
       if (g.fuse <= 0) {
         if (shown) this.blot(g.pos);
@@ -130,11 +157,14 @@ export class Grenades {
     const n = Math.min(mine + this.shown.length, 8);
     for (let i = 0; i < n; i++) {
       const g = i < mine ? this.live[i] : this.shown[i - mine];
-      this._m.makeTranslation(g.pos.x, g.pos.y, g.pos.z);
-      this.mesh.setMatrixAt(i, this._m);
+      this._m.compose(g.pos, g.rot, ONE);
+      for (const m of this.meshes) m.setMatrixAt(i, this._m);
     }
-    this.mesh.count = n;
-    this.mesh.instanceMatrix.needsUpdate = true;
+    for (const m of this.meshes) {
+      m.count = n;
+      m.visible = n > 0;
+      m.instanceMatrix.needsUpdate = true;
+    }
   }
 
   throw() {
@@ -143,25 +173,27 @@ export class Grenades {
     const p = this.player;
     _d.set(0, 0, -1).applyEuler(p.camera.rotation);
     const speed = GRENADE.throw.min + (GRENADE.throw.max - GRENADE.throw.min) * this.charge;
-    this.live.push({
+    this.live.push(spinning({
       pos: p.eye.clone().addScaledVector(_d, 0.5),
       vel: _d.clone().multiplyScalar(speed).add(new THREE.Vector3(0, 2.6, 0)).add(p.body.vel.clone().multiplyScalar(0.4)),
       fuse: GRENADE.fuse,
-    });
+    }));
     const g = this.live[this.live.length - 1];
     this.ctx.tell?.threw(g.pos, g.vel);
     this.ctx.audio?.throwNade();
   }
 
-  /** What a blast leaves to see and hear: the burst and the scorch. `near`: how loud, 0 to 1. */
+  /**
+   * What a blast leaves to see and hear (fx/effects.js `blast`), and a scorch on what it went
+   * off on, so the page remembers. A grenade rests 0.19 m above the surface it lies on, so the
+   * surface is found under it: the scorch was once stamped at the grenade's own middle, a hand
+   * above the floor. One that goes off in the air leaves none. `near`: how loud, 0 to 1.
+   */
   mark(pos, near = 1) {
     const ctx = this.ctx;
-    ctx.effects.burst(pos, new THREE.Vector3(0, 1, 0), 26, {
-      speed: 16, spread: 1.4, size: 0.09, life: 0.55, ink: INK.BLACK, gravity: 14, drag: 2.2, stretch: 0.16,
-    });
+    const ground = raycast(ctx.level, pos, DOWN, 0.6);
+    ctx.effects.blast(pos, GRENADE.blast.radius, ground);
     ctx.audio?.explosion(near);
-    // a scorch mark, so the page remembers
-    ctx.effects.decal(pos.clone().setY(pos.y + 0.02), new THREE.Vector3(0, 1, 0), { size: 3.5, ink: INK.BLACK });
   }
 
   /** A friend's grenade going off: seen and heard, and nothing more. */
@@ -172,8 +204,12 @@ export class Grenades {
   explode(pos) {
     const ctx = this.ctx;
     this.mark(pos);
-    ctx.effects.kick(0.8);
-    ctx.effects.stop(0.05, 0.2);
+    // the jolt is for a blast near you: all of it at the blast, none from 20 m
+    const near = Math.max(0, 1 - pos.distanceTo(ctx.camera.position) / 20);
+    if (near > 0) {
+      ctx.effects.kick(0.8 * near);
+      ctx.effects.stop(0.05 * near, 0.2);
+    }
     // Heard across the desk, but a bang is not where YOU are: what hears it
     // goes to look (whatever it hurts is hunting you anyway).
     ctx.enemies?.noise(pos, GRENADE.heard, 'bang');
@@ -202,4 +238,12 @@ export class Grenades {
       ctx.effects.hurt = 1;
     }
   }
+}
+
+/** A grenade turns over as it flies: about a random axis, 7-11 turns of a radian a second, halved by each bounce. */
+function spinning(g) {
+  g.rot = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.random() * Math.PI * 2);
+  g.axis = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+  g.spin = 7 + Math.random() * 4;
+  return g;
 }

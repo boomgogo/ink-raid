@@ -134,10 +134,13 @@ export class Audio {
     this.noise({ dur: 0.14, freq: 3200, decay: 0.2, gain: 0.22 });
   }
 
+  /** A grenade: a crack, the boom, and a rumble that dies away over a second. */
   explosion(near = 1) {
     if (near <= 0.02) return;
-    this.noise({ dur: 0.7, freq: 1400, decay: 0.05, gain: 0.55 * near });
-    this.tone({ freq: 90, to: 28, dur: 0.5, type: 'sawtooth', gain: 0.3 * near });
+    this.noise({ dur: 0.07, freq: 4200, q: 0.8, type: 'highpass', gain: 0.32 * near, decay: 0.5 });
+    this.noise({ dur: 0.8, freq: 1400, decay: 0.05, gain: 0.55 * near });
+    this.tone({ freq: 90, to: 26, dur: 0.6, type: 'sawtooth', gain: 0.3 * near });
+    this.noise({ dur: 1.2, freq: 160, q: 0.9, type: 'bandpass', gain: 0.28 * near, decay: 0.45 });
   }
 
   throwNade() { this.noise({ dur: 0.12, freq: 700, q: 3, type: 'bandpass', gain: 0.14, decay: 2 }); }
@@ -147,13 +150,16 @@ export class Audio {
     this.noise({ dur: 0.16, freq: 700, decay: 0.4, gain: 0.16 });
   }
 
-  step(speed) {
-    this.noise({ dur: 0.05, freq: 500 + speed * 40, q: 2, type: 'bandpass', gain: 0.05, decay: 0.6 });
+  /** `near`: 1 for your own, less for a friend's further off (net/crew.js). */
+  step(speed, near = 1) {
+    if (near <= 0.02) return;
+    this.noise({ dur: 0.05, freq: 500 + speed * 40, q: 2, type: 'bandpass', gain: 0.05 * near, decay: 0.6 });
   }
 
-  /** One burst of the jetpack's hiss; it sends one every JET.hissEvery while it burns. */
-  jet() {
-    this.noise({ dur: 0.14, freq: 1500, q: 0.7, type: 'bandpass', gain: 0.05, decay: 0.85 });
+  /** One burst of the jetpack's hiss; it sends one every JET.hissEvery while it burns. `near` as step's. */
+  jet(near = 1) {
+    if (near <= 0.02) return;
+    this.noise({ dur: 0.14, freq: 1500, q: 0.7, type: 'bandpass', gain: 0.05 * near, decay: 0.85 });
   }
 
   land(impact) {

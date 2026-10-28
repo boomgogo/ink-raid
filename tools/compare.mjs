@@ -310,14 +310,19 @@ export function figures(file) {
 
 // Measured on this build's lineups (tools/figures.mjs, 10-60 m), 30 figures:
 //
-//   fill  p10 0.49   median 0.63   p90 0.79
+//   fill  p10 0.33   median 0.39   p90 0.43
 //
-// The band is that tenth to ninetieth percentile, rounded out. The gate judges
+// The band is that tenth to ninetieth percentile, rounded out. Fill is the share of a figure's
+// box that is ink, so it goes with the figure's shape as well as its ink: with the arms held out
+// (plan 6) the box is a third wider and the fill lower, though every figure is found at every
+// distance, a solid red person with arms out at 40 m. Before plan 6 the arms crossed over the
+// chest and the lineup stood with its back to the camera: p10 0.49, median 0.63, p90 0.79, and
+// a band of 0.45-0.85. The gate judges
 // the MEDIAN figure in a shot rather than every figure: one enemy caught
 // mid-death or half behind cover is legitimately outside the band, and failing
 // a whole shot on it would make the gate noise. minRel is the smallest figure
 // worth judging: ten pixels on an 800-pixel frame.
-export const FIGURE_TOL = { fillMin: 0.45, fillMax: 0.85, target: 0.63, minRel: 0.0125 };
+export const FIGURE_TOL = { fillMin: 0.28, fillMax: 0.5, target: 0.39, minRel: 0.0125 };
 
 function figureGate(file) {
   const m = figures(file);

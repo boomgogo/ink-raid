@@ -168,7 +168,7 @@ export const GUNS = {
     },
     aiming: {
       sightFov: 66,                // m = tan40/tan33 = 1.29x, near the 1.3x target
-      aimZ: 0.30,                  // clears the 0.09-long model with room to spare
+      aimZ: 0.30,                  // clears the 0.11-long model by 0.24 m past the near plane
     },
     feel: {
       camKickPitch: 0.015, camKickYaw: 0.004,
@@ -448,6 +448,8 @@ export class Gun extends WeaponBase {
     }
 
     this.place(dt, input);
+    // the parts that move: a magazine out and back, a pump racked, a bolt worked, a lever down
+    this.model.tick?.(this);
   }
 
   fire() {

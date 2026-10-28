@@ -136,6 +136,21 @@ export function buildDesk(scene) {
     ? wanted
     : (b.openPoints(1, { radius: 18, pad: 2.5, prefer: 'inner', headroom: 14 })[0] || wanted);
   b.startPoint.copy(start).add(new THREE.Vector3(0, 0.1, 0));
+  // Where each player in a room starts (Net.slot): the start, then a row across the way it looks
+  // (up the arena, along −z), alternating sides, as far as the ground is open, then a row behind
+  // it. Everybody on the one spot was a knot of figures inside each other. A friend's figure,
+  // arms out, is about 1.4 m across, so 2 m apart leaves a clear half metre between two: apart,
+  // and still plainly a group.
+  const ROW = { gap: 2, count: 8, wide: 4 };
+  b.startPoints.push(b.startPoint.clone());
+  for (let back = 0; back < 3 && b.startPoints.length < ROW.count; back++) {
+    for (let i = 0; i <= 2 * ROW.wide && b.startPoints.length < ROW.count; i++) {
+      const across = (i % 2 ? 1 : -1) * Math.ceil(i / 2) * ROW.gap;     // 0, +2, −2, +4, −4 ...
+      if (!back && !across) continue;                                   // the start itself
+      const x = b.startPoint.x + across, z = b.startPoint.z + back * ROW.gap;
+      if (b.isOpen(x, z, 1.2, 3, 10)) b.startPoints.push(new THREE.Vector3(x, b.startPoint.y, z));
+    }
+  }
 
   const level = b.finish(scene);
 

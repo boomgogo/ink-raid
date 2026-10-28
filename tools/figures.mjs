@@ -91,7 +91,9 @@ for (const dist of DISTANCES) {
     p.yaw = Math.PI; p.pitch = 0;
     const V = p.eye.constructor;
     let n = 0;
-    const step = Math.min(3.4, Math.max(1.2, d * 0.16));
+    // At least 2.4 m apart: a figure with its arms out is about 1.45 m across, and compare.mjs
+    // counts two boxes closer than a quarter of a figure's height (0.46 m) as one figure.
+    const step = Math.min(3.4, Math.max(2.4, d * 0.16));
     types.forEach((t, i) => {
       const at = new V((i - (types.length - 1) / 2) * step, Y, d);
       const e = E.spawn(t, at);
@@ -103,7 +105,9 @@ for (const dist of DISTANCES) {
       // working perfectly.
       e.body.pos.copy(at);
       e.fig.root.position.copy(at);
-      e.fig.root.rotation.y = Math.PI;          // facing the camera
+      // Facing the camera, which looks along +z: a figure faces −z (rig.js), so it is not turned
+      // at all. Turned by π, as it once was, the lineup showed the camera its back.
+      e.fig.root.rotation.y = 0;
       n++;
     });
     return n;
@@ -121,7 +125,7 @@ for (const dist of DISTANCES) {
   const fills = big.map((f) => f.fill).sort((a, b) => a - b);
   const median = fills.length ? fills[fills.length >> 1] : null;
   const heights = big.map((f) => f.box[1]).sort((a, b) => a - b);
-  rows.push({ dist, placed, found: big.length, median, px: heights.length ? heights[heights.length >> 1] : null });
+  rows.push({ dist, placed, found: big.length, median, px: heights.length ? heights[heights.length >> 1] : null, fills });
 }
 
 await browser.close();
@@ -138,5 +142,10 @@ for (const r of rows) {
     + `${String(r.found).padStart(5)}  ${String(r.px ?? '-').padStart(13)}   `
     + `${(r.median ?? 0).toFixed(3).padStart(11)}   ${ok && seen ? 'ok' : 'FAIL'}`);
 }
+// Every figure's fill, at every distance: what FIGURE_TOL's band is the tenth to ninetieth
+// percentile of, rounded out (compare.mjs), for when the figures are meant to change.
+const all = rows.flatMap((r) => r.fills).sort((a, b) => a - b);
+const at = (q) => all[Math.min(all.length - 1, Math.floor(q * all.length))]?.toFixed(2);
+console.log(`\n  all ${all.length} figures: fill p10 ${at(0.1)}   median ${at(0.5)}   p90 ${at(0.9)}`);
 console.log(`\n${pass ? 'PASS' : 'FAIL'} — figures stay readable from 10 m to 60 m`);
 process.exit(pass ? 0 : 1);

@@ -206,6 +206,7 @@ export class Builder {
     this.things = new Map();    // name -> { name, squeezes }; see thing()
     this.current = null;        // the thing being drawn
     this.startPoint = new THREE.Vector3(0, 2, 0);
+    this.startPoints = [];      // where each player in a room starts, the start first; see map_desk.js
   }
 
   /**
@@ -986,6 +987,7 @@ export class Builder {
       rooms: this.rooms,
       things: this.things,
       startPoint: this.startPoint,
+      startPoints: this.startPoints.length ? this.startPoints : [this.startPoint],
       drawCalls: meshes.length,
     };
   }

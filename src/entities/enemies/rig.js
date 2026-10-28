@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { surface } from '../../render/surface.js';
 import { INK, LOOK } from '../../render/palette.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { buildProp } from '../weapons/models.js';
 
 const box = (w, h, d, x, y, z) => new THREE.BoxGeometry(w, h, d).translate(x, y, z);
 const merged = (geos) => mergeGeometries(geos, false);
@@ -49,6 +50,11 @@ const PROPORTION = {
   headFrac: 0.28,         // head diameter, as a fraction of drawn height
   armSpread: (62 * Math.PI) / 180,
 };
+
+// A limb's capsule against its drawn radius, and how far short of a hand or a foot it stops, in
+// radii: see the hit volumes in buildFigure.
+const HIT_LIMB = 0.94;
+const HIT_END = 0.4;
 
 /**
  * @param {object} t  a type's `look` (hat, prop) and `frame` (scale, girth,
@@ -122,8 +128,12 @@ export function buildFigure(t, penId = INK.RED) {
   // figure read as a head on a bag with two legs. PROPORTION.armSpread (62
   // deg from vertical) is the angle at which an arm reads as a separate limb
   // rather than as part of the trunk.
-  armUL.rotation.z = PROPORTION.armSpread;
-  armUR.rotation.z = -PROPORTION.armSpread;
+  //
+  // Out means away from the body: the left arm hangs at −x, so it turns by −z
+  // to swing out, and the right by +z. The signs were once the other way round,
+  // and every figure at rest held its arms crossed in front of its chest.
+  armUL.rotation.z = -PROPORTION.armSpread;
+  armUR.rotation.z = PROPORTION.armSpread;
   armUL.add(limb(line, limbRadius, 0.30));
   armUR.add(limb(line, limbRadius, 0.30));
   const armFL = new THREE.Group(); armFL.position.y = -0.30; armUL.add(armFL);
@@ -147,16 +157,18 @@ export function buildFigure(t, penId = INK.RED) {
   const grip = new THREE.Group();
   grip.position.set(0, -0.22, 0);
   armFR.add(grip);
-  // A friend carries every gun a player can hold (`look.props`), each in a
-  // group of its own, and shows the one in their hands: a hidden mesh is not
-  // drawn, so the others cost nothing.
+  // A friend carries every weapon a player can hold (`look.props`, by their
+  // keys), each the very model in your own hands (weapons/models.js buildProp),
+  // in its own inks, and shows the one in theirs: a hidden mesh is not drawn, so
+  // the others cost nothing. `muzzle` is where their tracers leave from.
   const props = {};
   if (t.look.props) {
     for (const kind of t.look.props) {
-      props[kind] = new THREE.Group();
-      props[kind].visible = false;
-      grip.add(props[kind]);
-      addProp(props[kind], kind, line, solid);
+      const prop = buildProp(kind);
+      props[kind] = prop.root;
+      prop.root.visible = false;
+      prop.root.userData.muzzle = prop.muzzle;
+      grip.add(prop.root);
     }
   } else {
     addProp(grip, t.look.prop, line, solid);
@@ -180,7 +192,18 @@ export function buildFigure(t, penId = INK.RED) {
   // stride at fourteen metres, and asking both the hitboxes and the triangles
   // on the page: the target is 0.0% of shots landing on the drawing that do
   // not register.
+  //
+  // A limb is drawn as a six-sided cylinder (LIMB_SEG), its corners at its
+  // radius and its flats at 0.87 of it, tapering to 0.88 at the far end, with
+  // no hand or foot past its end. Its capsule is a little narrower than the
+  // corners (HIT_LIMB: the smaller aim margin, PLAY's 1.08, brings it back out
+  // past them), and a forearm's and a shin's stop HIT_END of their radius short
+  // of the end, so the rounded cap reaches just past the flat end's corners,
+  // not a whole radius beyond the hand or the foot. In plan 6 that took the
+  // shots registering beside the drawing from 2984 to 2238, a quarter fewer,
+  // with none missed on it.
   const sc = t.frame.scale || 1;
+  const rl = limbRadius * HIT_LIMB;
   const hit = [
     { part: 'head', node: headMesh, len: 0, r: headR * sc },
     // The chest is drawn as a sphere squashed to 0.86 x 1.28 x 0.72, so a
@@ -189,14 +212,14 @@ export function buildFigure(t, penId = INK.RED) {
     // the same shape to within a centimetre. The shoulders that a fat sphere
     // would be reaching for are the arm capsules' job instead.
     { part: 'torso', node: chestMesh, off: 0.11 * girth, len: 0.22 * girth, r: 0.19 * girth * sc },
-    { part: 'arms', node: armUL, len: 0.30, r: limbRadius * sc },
-    { part: 'arms', node: armUR, len: 0.30, r: limbRadius * sc },
-    { part: 'arms', node: armFL, len: 0.24, r: limbRadius * 0.92 * sc },
-    { part: 'arms', node: armFR, len: 0.24, r: limbRadius * 0.92 * sc },
-    { part: 'legs', node: legUL, len: thighLen, r: limbRadius * 1.1 * sc },
-    { part: 'legs', node: legUR, len: thighLen, r: limbRadius * 1.1 * sc },
-    { part: 'legs', node: legFL, len: shinLen, r: limbRadius * sc },
-    { part: 'legs', node: legFR, len: shinLen, r: limbRadius * sc },
+    { part: 'arms', node: armUL, len: 0.30, r: rl * sc },
+    { part: 'arms', node: armUR, len: 0.30, r: rl * sc },
+    { part: 'arms', node: armFL, len: 0.24 - HIT_END * rl * 0.92, r: rl * 0.92 * sc },
+    { part: 'arms', node: armFR, len: 0.24 - HIT_END * rl * 0.92, r: rl * 0.92 * sc },
+    { part: 'legs', node: legUL, len: thighLen, r: rl * 1.1 * sc },
+    { part: 'legs', node: legUR, len: thighLen, r: rl * 1.1 * sc },
+    { part: 'legs', node: legFL, len: shinLen - HIT_END * rl, r: rl * sc },
+    { part: 'legs', node: legFR, len: shinLen - HIT_END * rl, r: rl * sc },
     // a hat wider than the head brings its own volumes: see addHat
     ...hatHits.map((h) => ({ ...h, r: h.r * sc })),
   ];
@@ -497,7 +520,7 @@ export function pose(J, o) {
     J.armUR.rotation.z = -0.35 - 0.3 * up;
     J.armFR.rotation.x = -0.9 * up + 0.2 * cut;
     J.armUL.rotation.x = -0.6 * up;
-    J.armUL.rotation.z = PROPORTION.armSpread;
+    J.armUL.rotation.z = -PROPORTION.armSpread;      // the free arm out, for balance
     J.armFL.rotation.x = 0.5;
     // back through the wind-up, forward into the cut
     J.chest.rotation.x += 0.25 * up - 0.35 * cut;
@@ -512,9 +535,9 @@ export function pose(J, o) {
     J.armFL.rotation.x = 0.4;
   } else {
     J.armUR.rotation.x = swing2 * 0.7;
-    J.armUR.rotation.z = -PROPORTION.armSpread;
+    J.armUR.rotation.z = PROPORTION.armSpread;
     J.armUL.rotation.x = swing * 0.7;
-    J.armUL.rotation.z = PROPORTION.armSpread;
+    J.armUL.rotation.z = -PROPORTION.armSpread;
     J.armFR.rotation.x = 0.25 + Math.max(0, swing2) * 0.5;
     J.armFL.rotation.x = 0.25 + Math.max(0, swing) * 0.5;
   }

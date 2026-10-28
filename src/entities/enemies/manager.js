@@ -48,6 +48,12 @@ const NOBODY = {
 const _targets = [];
 const _players = [];
 /** Whichever of `players` is nearest `e`. */
+/**
+ * On its nest: a sniper that has not come down from it (renest). Once down, it walks, searches and
+ * is redrawn like anything else.
+ */
+const rooted = (e) => !!e.t.role?.stationary && !e.afoot;
+
 const nearest = (e, players) => {
   let best = players[0], bd = Infinity;
   for (const q of players) {
@@ -116,7 +122,8 @@ export const AWARE = {
   // chance to lead you to them. A search, not a hunt: a hunt refreshed every
   // frame never goes blind, so one that could not reach you (you up on a
   // ledge, it below) pushed at the wall for the rest of the run. A sniper on
-  // its nest stays put; the pips still point at it.
+  // its nest moves to a nest that sees you, and if none does, comes down off
+  // it and searches like the rest (renest).
   straggle: 35,
   straggleEvery: 8,
 };
@@ -463,7 +470,7 @@ export class Enemies {
     if (players?.length && this.alive > 0 && this.alive <= 2 && this.contactT > AWARE.straggle) {
       for (const e of this.list) {
         if (!e.alive) continue;
-        if (e.t.role?.stationary) {
+        if (rooted(e)) {
           // a sniper on a nest nobody can see from where you are (the mug's,
           // seen only over its rim) moves to one that can see you, and fires
           // from there: the round in the air is what gives it away
@@ -517,6 +524,10 @@ export class Enemies {
   /**
    * A straggling sniper to a free nest with a line to you (with friends, to any of `players`),
    * facing whoever it sees from there; see AWARE.straggle.
+   *
+   * When no nest has one, twice running (`straggleEvery` * 2 apart), it comes down (comeDown).
+   * Left on its nest, the last figure of a wave held it open until the player went and found it,
+   * and the bot never did: it stood still until its 30-minute cap.
    */
   renest(e, players) {
     e.straggling = true;
@@ -530,7 +541,12 @@ export class Enemies {
     const free = (this.ctx.level.snipers || []).filter((n) =>
       !this.list.some((o) => o.alive && o !== e && o.body.pos.distanceTo(n) < 2) && players.some((q) => sees(n, q)));
     const n = free[Math.floor(Math.random() * free.length)];
-    if (!n) return;
+    if (!n) {
+      e.nestless = (e.nestless || 0) + 1;
+      if (e.nestless >= 2) this.comeDown(e, players);
+      return;
+    }
+    e.nestless = 0;
     const p = players.find((q) => sees(n, q));
     e.body.pos.set(n.x, n.y + 0.1, n.z);
     e.body.vel.set(0, 0, 0);
@@ -541,11 +557,42 @@ export class Enemies {
   }
 
   /**
+   * A sniper with no nest that sees anyone, off its nest and searching on foot (renest): drawn
+   * again on open ground out of everybody's sight, as near the nearest player as TRAPPED.away
+   * allows, and searching for them from there as any straggler does. Put down on the ground
+   * nearest its nest instead, it walked for over a minute before it was found.
+   */
+  comeDown(e, players) {
+    const pool = this.ctx.level.spawnPool || [];
+    const to = nearest(e, players).body.pos;
+    const seen = (q) => players.some((p) => {
+      _d.set(q.x, q.y + 1.2, q.z).sub(p.eye);
+      const d = _d.length();
+      return !raycast(this.ctx.level, p.eye, _d.multiplyScalar(1 / d), d);
+    });
+    let best = null, bd = Infinity;
+    for (const q of pool) {
+      const d = Math.hypot(q.x - to.x, q.z - to.z);
+      if (d >= bd || players.some((p) => Math.hypot(q.x - p.body.pos.x, q.z - p.body.pos.z) < TRAPPED.away)) continue;
+      if (!seen(q)) { bd = d; best = q; }
+    }
+    if (!best) return;
+    e.afoot = true;
+    e.body.pos.set(best.x, best.y + 0.1, best.z);
+    e.body.vel.set(0, 0, 0);
+    e.fig.root.position.copy(e.body.pos);
+    e.stillAt = null;
+    this.search(e, nearest(e, players).center);
+    e.straggling = true;
+    this.redrawn = (this.redrawn || 0) + 1;
+  }
+
+  /**
    * See TRAPPED: one that has been going nowhere for too long is drawn again elsewhere, away
    * from and out of sight of every one of `players`.
    */
   trapped(e, dt, players) {
-    if (e.ladder || e.t.role?.stationary) { e.stillAt = null; return; }
+    if (e.ladder || rooted(e)) { e.stillAt = null; return; }
     if (!e.stillAt || e.body.pos.distanceTo(e.stillAt) > TRAPPED.moved) {
       (e.stillAt ||= new THREE.Vector3()).copy(e.body.pos);
       e.stillT = 0;
@@ -637,8 +684,8 @@ export class Enemies {
     let wantYaw;
     if (e.ladder) wantYaw = Math.atan2(e.ladder.nx, e.ladder.nz);
     else if (hunting) wantYaw = Math.atan2(-_to.x, -_to.z);
-    else if (Math.hypot(b.vel.x, b.vel.z) > 0.8 && !t.role?.stationary) wantYaw = Math.atan2(-b.vel.x, -b.vel.z);
-    else wantYaw = e.lookYaw + Math.sin(e.mindT * (t.role?.stationary ? 0.45 : 0.9)) * (t.role?.stationary ? 1.2 : 0.8);
+    else if (Math.hypot(b.vel.x, b.vel.z) > 0.8 && !rooted(e)) wantYaw = Math.atan2(-b.vel.x, -b.vel.z);
+    else wantYaw = e.lookYaw + Math.sin(e.mindT * (rooted(e) ? 0.45 : 0.9)) * (rooted(e) ? 1.2 : 0.8);
     e.yaw = angleDamp(e.yaw, wantYaw, hunting ? 8 : 4, dt);
     e.fig.root.rotation.y = e.yaw;
 
@@ -646,8 +693,12 @@ export class Enemies {
     let wantMove = 0;
     if (staggered || !hunting || e.chargeState === 'wind') {
       wantMove = 0;
-    } else if (t.role?.stationary) {
+    } else if (rooted(e)) {
       wantMove = dist > t.pace.engage ? 1 : 0;
+    } else if (e.afoot) {
+      // A sniper down off its nest (comeDown) stands and shoots once it sees you, and closes in
+      // while it cannot. With a nest's pace it backed away to 70 m, into the first wall behind it.
+      wantMove = sees ? 0 : 1;
     } else {
       // close to `closeTo`, back off below `backOff`: a band, not a point, or
       // they jitter forwards and backwards on the boundary.
@@ -700,7 +751,7 @@ export class Enemies {
         if (along < CLIMB.over) { b.vel.x += e.overX * (CLIMB.over - along); b.vel.z += e.overZ * (CLIMB.over - along); }
         if (b.onGround && b.pos.y > lip - 0.1) e.endClock = 0;
       } else if (!hunting) {
-        if (!staggered && !t.role?.stationary && this.wander(e, dt)) {
+        if (!staggered && !rooted(e) && this.wander(e, dt)) {
           e.wantsMove = true;
           wx = _d.x * speed * (e.mind === 'search' ? AWARE.searchSpeed : AWARE.roamSpeed);
           wz = _d.z * speed * (e.mind === 'search' ? AWARE.searchSpeed : AWARE.roamSpeed);
@@ -952,7 +1003,7 @@ export class Enemies {
   perceive(e, dt, p, dist) {
     const t = e.t;
     const st = p.remote ? p.stance : this.stance;
-    let range = (t.role?.stationary ? (st === 'crouch' ? AWARE.sniperCrouched : AWARE.sniperSight) : AWARE.sight[st]) * difficulty.sight;
+    let range = (rooted(e) ? (st === 'crouch' ? AWARE.sniperCrouched : AWARE.sniperSight) : AWARE.sight[st]) * difficulty.sight;
     let sees = false, rate = 0;
     if (dist < range) {
       const hx = _to.x, hz = _to.z, hl = Math.hypot(hx, hz);
@@ -1007,7 +1058,7 @@ export class Enemies {
     e.mind = 'search';
     e.mindT = 0;
     e.notice = Math.min(e.notice, 0.5);
-    e.roamTo = e.t.role?.stationary ? null : at.clone();
+    e.roamTo = rooted(e) ? null : at.clone();
     e.home = at.clone();
     e.homeT = AWARE.homeFor;
     e.lookT = 0;

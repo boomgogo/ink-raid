@@ -131,6 +131,12 @@ export class Game {
       if (locked || this.state !== 'playing' || this.touch.enabled || ctx.input.pad.active) return;
       this.pause();
     };
+    // And so does the page going out of sight: a phone switched to another app, a tab put
+    // behind another. Coming back lands on the pause screen, not in the fight. Neither a phone
+    // nor a pad has a pointer lock to lose, so without this they came back mid-fight.
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) this.pause();
+    });
 
     // The katana gets first refusal on every incoming round and strike, while
     // there is a fight: behind the death screen its guard is whatever it was.
@@ -161,7 +167,7 @@ export class Game {
     p.onLand = (impact) => { if (impact > 0.1) this.audio.land(impact); };
     p.onStep = (speed) => this.audio.step(speed);
     p.onVoidDrop = () => {
-      p.body.pos.copy(this.ctx.level.startPoint);
+      p.body.pos.copy(this.startSpot());
       p.body.vel.set(0, 0, 0);
       p.body.riding = null;
       p.damage(25);
@@ -348,7 +354,7 @@ export class Game {
     this.hud.showTwist('');
 
     const p = this.ctx.player;
-    p.respawn();
+    p.respawn(this.startSpot());
     for (const w of this.weapons) {
       if (!w.firesRounds) { w.resetGuard?.(); continue; }
       w.mag = w === this.stapler ? 0 : w.stats.ammo.clipSize;
@@ -373,10 +379,13 @@ export class Game {
     this.state = 'paused';
     // nothing moves the player behind the panel: a burn left lit would hang in the air there
     this.ctx.player.jet.cut();
+    // Let go of every finger: one that was down as the page went away may never say it lifted,
+    // and would walk the stick on, or hold INK down, once the run was resumed.
+    this.touch.clear();
     this.pausedAt = performance.now();
     this.hud.screens.pause({
       diffLabel: difficulty.label, score: this.score, wave: this.waves.wave,
-      shared: !!this.net?.inRoom(),
+      shared: !!this.net?.inRoom(), touch: this.touch.enabled,
       onMainMenu: () => this.quitToMenu(),
       onBackdrop: () => this.resume(),
     });
@@ -436,8 +445,7 @@ export class Game {
     }
     this.waves.stop();
     this.enemies.clear();
-    this.grenades.live.length = 0;
-    this.grenades.mesh.count = 0;
+    this.grenades.clear();
     this.pickups.reset();
     this.wrapT = 0;
     this.touch.clear();
@@ -461,11 +469,20 @@ export class Game {
     return { label: n > 1 ? `PLAY WITH FRIENDS · ${n} here` : 'PLAY WITH FRIENDS', onClick: () => net.open() };
   }
 
+  /**
+   * Where this page's player starts, and comes back after a fall or a wave down: its own place in
+   * the start row (world/map_desk.js), by the order it came into the room. Alone, the start.
+   */
+  startSpot() {
+    const row = this.ctx.level.startPoints;
+    return row[(this.net?.slot() || 0) % row.length];
+  }
+
   /** A wave starts: whoever is down is back at the start, with full health. */
   revive() {
     const down = this.state === 'down' || (this.state === 'paused' && this.pausedFrom === 'down');
     if (!down || !this.net?.runOn()) return;
-    this.ctx.player.respawn();
+    this.ctx.player.respawn(this.startSpot());
     if (this.state === 'down') this.state = 'playing';
     else this.pausedFrom = 'playing';
   }

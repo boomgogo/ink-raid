@@ -55,6 +55,17 @@ export class Net {
 
   runOn() { return !!this.run?.on; }
 
+  /**
+   * This page's place in the start row (Game.startSpot): how many of the others came into the
+   * room before it. p3p2's `order` is the order of joining, the same on every page, so two pages
+   * that see the same members never take the same place. Alone, 0.
+   */
+  slot() {
+    const r = this.room;
+    if (!r) return 0;
+    return r.members.filter((m) => m !== r.self && m.order < r.self.order).length;
+  }
+
   /** The 👥 panel: how to get into a room, the invite to pass on, who is here. */
   open() { this.p3p2.open(); }
 

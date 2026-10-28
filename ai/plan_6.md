@@ -10,7 +10,7 @@ Answers `prompt_6.md`. Where each item of the prompt is answered:
 | Phone 3: a touch anywhere on the right shoots | §4 |
 | Feature 1: new, fancier models for every weapon | §1 |
 | Feature 2: a longer throw, a better explosion | §5 |
-| Older items | §6. All four are still there (checked below) |
+| Older items | §6. All four are still there (checked below). The idle arms are added |
 
 ## 1. The weapons: new models, and the same ones in a friend's hands
 
@@ -247,6 +247,7 @@ Each one checked against the code as it is today.
 | Hit volumes bigger than the drawn limbs | yes | the capsules in `buildFigure()` are unchanged since `next_3.md` measured 2377 shots registering beside the drawing, and none missed on it |
 | `figures.mjs`'s lineup faces away from the camera | yes | the camera looks along +z (yaw π), and the lineup is turned π, so it faces +z too, away from the camera, though the comment says "facing the camera" |
 | A friend's footsteps and jetpack make no sound | yes | `crew.js` draws their jet's puffs, "and no hiss (their steps are not heard either)" |
+| The idle arms cross in front of the chest (from `ai/summary.md`, added to this plan) | yes | `pose()`'s rest branch turns the left arm by +`armSpread` about z, which swings it across the body |
 
 ### The last sniper comes down
 
@@ -282,8 +283,9 @@ Then trim what the numbers point at. Two likely sources, from the code:
 - **The radius.** A limb is drawn as a six-sided cylinder, whose flats are 0.87 of its radius from
   the axis, tapering to 0.88 at the bottom. Its capsule uses the full radius.
 
-The gate stays: 0.0% of the shots that land on the drawing go unregistered. The aim is half as
-many registering beside it, from 2377. `npm run collide`'s "every hit volume inside its bound"
+The gate stays: 0.0% of the shots that land on the drawing go unregistered. The aim is a
+quarter fewer registering beside it: from 2377 to about 1780, and no further, so the volumes stay
+a little generous for a thumb on a phone. `npm run collide`'s "every hit volume inside its bound"
 still holds.
 
 ### `figures.mjs`'s lineup faces the camera
@@ -295,6 +297,20 @@ still holds.
   - If it leaves the band, the band is moved to the new measurement, not the figure: the figures
     are what they were, and only the side being measured changed.
   - The old and new numbers go in `next_6.md`.
+
+### The idle arms
+
+- **The fault:** at rest, and walking, a figure's arms cross in front of its chest. `pose()` sets
+  their spread about z with the wrong sign: a hanging arm turned by +62° about z swings towards
+  +x, and the left arm hangs at −x, so it swings across the body. The right arm does the same the
+  other way.
+- **The fix:** the signs flip, so the arms are held out from the body, as `PROPORTION.armSpread`'s
+  comment says they are: in the rest branch of `pose()`, for the free left arm in a wind-up, and
+  in `buildFigure()`'s starting values, which the broad-phase bound is measured from.
+  - The aim pose is left: there both hands are meant to come in to the gun.
+- **Checked:** `npm run collide` (the guns still point where their figures aim, every hit volume
+  still inside its bound), a still of the lineup before and after, and `figures.mjs`'s band,
+  measured once for this and the lineup's turn together.
 
 ### A friend is heard
 
@@ -372,8 +388,8 @@ In `Crew.draw()`, where the puffs already are:
   - Co-op: a friend's gun is the model you hold, the start row, their steps and jet;
   - Touch: PAUSE, no tap fire, pause on app switch;
   - Enemies that cannot be found or reached: the sniper that comes down, out of "Not yet handled";
-  - Known issues: the hit volumes as measured, `figures.mjs` facing the camera, the idle arms if
-    still there.
+  - Known issues: the hit volumes as measured, `figures.mjs` facing the camera, the idle arms
+    gone.
 - **`README.md`:** the touch controls (no tap fire, PAUSE along the top right), and pausing.
 - **`ai/next_6.md`** afterwards, as usual.
 
@@ -385,8 +401,9 @@ In `Crew.draw()`, where the puffs already are:
 3. **The models,** one weapon at a time, each with the ADS check and its stills before the next.
 4. **`buildProp`** and a friend's figure, then `collide.mjs` and `coop.mjs`.
 5. **The grenade:** the throw, the model, the blast.
-6. **The older items:** the sniper, the lineup, a friend's sounds, then the hit volumes, measured
-   before they are trimmed.
+6. **The older items:** the sniper, the lineup and the idle arms (one re-measure of
+   `figures.mjs` for both), a friend's sounds, then the hit volumes, measured before they are
+   trimmed.
 7. **The full run of tools,** `perf` three times each way, the docs.
 
 ## Choices made that you may want otherwise
@@ -402,11 +419,6 @@ In `Crew.draw()`, where the puffs already are:
   rising into the bottom left as G is held would be one more model in the held pass. It isn't
   asked, so it is left.
 - **`min` throw speed stays,** so a quick tap is still a lob into your own blast.
-- **The hit volumes are trimmed by measurement, to half the misses beside the drawing.**
-  Generous hit volumes help a thumb on a phone. If you'd rather keep them as they are, the
-  measuring still goes in and the trimming doesn't.
-- **The idle arms are not in this plan.** At rest a figure's arms still cross in front of its
-  chest (`pose()`'s spread has the wrong sign). The fix was held back because `figures.mjs`'s band
-  was tuned on that look. Since this plan re-measures the band anyway, it is the cheapest time to
-  fix the arms too: say so and it goes in step 6.
+- **The hit volumes are trimmed by a quarter** of the shots that register beside the drawing,
+  not more: generous hit volumes help a thumb on a phone.
 - **2 m between start points.** Wider reads more clearly as apart. Narrower reads more as a squad.

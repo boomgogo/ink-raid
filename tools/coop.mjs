@@ -210,6 +210,25 @@ await until(B, () => window.__ink.net.runOn());
 await play(B);
 await hardy(A);
 await hardy(B);
+// Apart at the start: each page puts its player on its own place in the start row, by the order
+// it came into the room, and nobody stands inside anybody else.
+/** Where each page's own player is, its place in the row, and where that place is. */
+const atStart = (ps) => Promise.all(ps.map((p) => run(p, () => {
+  const I = window.__ink, row = I.game.ctx.level.startPoints, slot = I.net.slot();
+  return { slot, pos: I.player.body.pos.toArray(), spot: row[slot % row.length].toArray() };
+})));
+/** The two nearest players, apart on the ground, metres, and whether each is on its own place. */
+const spread = (rows) => {
+  let near = Infinity;
+  for (const [i, a] of rows.entries()) for (const b of rows.slice(i + 1)) near = Math.min(near, Math.hypot(a.pos[0] - b.pos[0], a.pos[2] - b.pos[2]));
+  return { near, own: rows.every((r) => Math.hypot(r.pos[0] - r.spot[0], r.pos[2] - r.spot[2]) < 0.3) };
+};
+{
+  const rows = await atStart([A, B]);
+  const { near, own } = spread(rows);
+  check('two players: apart at the start', near >= 1.8 && own && rows[0].slot !== rows[1].slot,
+    `places ${rows.map((r) => r.slot).join(' and ')}, ${near.toFixed(1)} m apart, ${own ? 'each on its own' : 'NOT on their places'}`);
+}
 await until(A, () => window.__ink.net.horde.list().length >= 3, null, 30000);
 await sleep(1500);
 {
@@ -333,6 +352,33 @@ await sleep(1500);
   check('a friend\'s jetpack is seen burning', lit && puffs > 0 && out, `lit on the host's page ${lit}, ${puffs} puffs round the figure, out again ${out}`);
 }
 
+// --- a friend is heard -------------------------------------------------------------
+// Their steps as they walk, and their jet's hiss as it burns, on the host's page, quieter for the
+// 6 m between them: counted by wrapping the host's audio, as nothing here can listen.
+{
+  const near = await run(A, () => {
+    const a = window.__ink.game.ctx.audio;
+    window.__heard = { steps: 0, hiss: 0 };
+    const step = a.step.bind(a), jet = a.jet.bind(a);
+    a.step = (sp, n = 1) => { if (n < 1) window.__heard.steps++; return step(sp, n); };
+    a.jet = (n = 1) => { if (n < 1) window.__heard.hiss++; return jet(n); };
+    return window.__ink.player.body.pos.toArray();
+  });
+  await run(B, (p) => { window.__ink.teleport(p[0] + 6, p[1] + 0.1, p[2]); window.__ink.face(Math.PI / 2, 0); }, near);
+  await sleep(600);
+  await run(B, () => { window.__ink.input.state.forward = true; });
+  await sleep(1800);
+  await run(B, () => { window.__ink.input.state.forward = false; });
+  const walked = await run(A, () => window.__heard.steps);
+  await run(B, () => { window.__ink.input.state.jet = true; });
+  await sleep(1000);
+  await run(B, () => { window.__ink.input.state.jet = false; });
+  await sleep(1500);
+  const heard = await run(A, () => window.__heard);
+  check('a friend is heard: steps and jet', walked >= 3 && heard.hiss >= 5,
+    `${walked} steps in 1.8 s of walking, ${heard.hiss} bursts of hiss from a 1 s burn, 6 m off`);
+}
+
 // --- a friend's landing ------------------------------------------------------------
 // Up on a whole tank, down again and stood still: the last report says where they
 // landed, and nothing comes after it. The figure must stop there, not carry on
@@ -387,7 +433,7 @@ const held = (i) => run(B, (n) => {
 }, i);
 const drawnOf = (p) => run(p, () => ({ ...window.__ink.net.crew.drawn }));
 {
-  // the gun in their hands, and only that one
+  // the gun in their hands, and only that one: the same model, by the same key (rig.js buildProp)
   const seen = [];
   for (let i = 0; i < 5; i++) {
     const key = await held(i);
@@ -395,7 +441,7 @@ const drawnOf = (p) => run(p, () => ({ ...window.__ink.net.crew.drawn }));
     const ok = await until(A, ([b, k]) => {
       const m = window.__ink.net.crew.mates.get(b);
       const on = Object.entries(m.fig.props).filter(([, g]) => g.visible).map(([k2]) => k2);
-      return m.held === k && on.length === 1;
+      return m.held === k && on.length === 1 && on[0] === k;
     }, [bId, key], 2000);
     seen.push(`${key} ${ok ? `${Date.now() - t0} ms` : 'never'}`);
   }
@@ -490,7 +536,7 @@ const drawnOf = (p) => run(p, () => ({ ...window.__ink.net.crew.drawn }));
   const at = await run(B, () => window.__ink.player.body.pos.toArray());
   await run(A, (p) => window.__ink.teleport(p[0] + 2, p[1] + 0.1, p[2]), at);
   await sleep(500);
-  const before = await run(A, () => ({ hp: window.__ink.player.hp, scorch: window.__ink.game.effects.decals.filter((d) => d?.size === 3.5).length }));
+  const before = await run(A, () => ({ hp: window.__ink.player.hp, scorch: window.__ink.game.effects.blasted }));
   const throws = (await drawnOf(A)).throws;
   await run(B, () => {
     const g = window.__ink.game.grenades;
@@ -502,9 +548,9 @@ const drawnOf = (p) => run(p, () => ({ ...window.__ink.net.crew.drawn }));
   const flew = await until(A, (n) => window.__ink.net.crew.drawn.throws > n && window.__ink.game.grenades.shown.length === 1, throws, 2000);
   const off = await until(A, () => window.__ink.game.grenades.shown.length === 0, null, 5000);
   await sleep(200);
-  const after = await run(A, () => ({ hp: window.__ink.player.hp, scorch: window.__ink.game.effects.decals.filter((d) => d?.size === 3.5).length }));
+  const after = await run(A, () => ({ hp: window.__ink.player.hp, scorch: window.__ink.game.effects.blasted }));
   check('a friend\'s grenade: seen, gone off, harmless', flew && off && after.scorch > before.scorch && after.hp === before.hp,
-    `in the air on the host's page ${flew}, gone off ${off}, scorched ${after.scorch > before.scorch}, the host 2 m off lost ${before.hp - after.hp} hp`);
+    `in the air on the host's page ${flew}, gone off ${off}, the blast drawn ${after.scorch > before.scorch}, the host 2 m off lost ${before.hp - after.hp} hp`);
   await hardy(B);
 }
 await run(A, () => {
@@ -580,7 +626,10 @@ await run(A, () => {
   const wave = await nextWave(A);
   const up = await until(B, () => window.__ink.game.state === 'playing' && window.__ink.player.alive, null, 20000);
   await hardy(B);
-  check('down: back up when the next wave starts', up, `wave ${wave} -> ${await run(B, () => window.__ink.game.waves.wave)}, guest ${await run(B, () => window.__ink.game.state)}`);
+  const [back] = await atStart([B]);
+  const home = Math.hypot(back.pos[0] - back.spot[0], back.pos[2] - back.spot[2]);
+  check('down: back up when the next wave starts', up && back.slot === 1 && home < 0.3,
+    `wave ${wave} -> ${await run(B, () => window.__ink.game.waves.wave)}, guest ${await run(B, () => window.__ink.game.state)}, at its own place (${back.slot}) ${home < 0.3}`);
 }
 
 // --- four players ------------------------------------------------------------------
@@ -590,6 +639,12 @@ await play(C);
 await play(D);
 await hardy(C);
 await hardy(D);
+{
+  const rows = await atStart([C, D]);
+  const { near, own } = spread(rows);
+  check('four players: the next two apart', near >= 1.8 && own && rows[0].slot === 2 && rows[1].slot === 3,
+    `places ${rows.map((r) => r.slot).join(' and ')}, ${near.toFixed(1)} m apart, ${own ? 'each on its own' : 'NOT on their places'}`);
+}
 await sleep(2000);
 {
   const r = await run(A, () => {
@@ -689,6 +744,9 @@ await sleep(2000);
   const E = await join('Ed', invite, { w: 390, h: 844, dsf: 2 });
   await play(E);
   await hardy(E);
+  // Ed's own place in the start row is beside the start; the page alone stood on it. The same
+  // view for both, so the difference is the friends and nothing else.
+  await run(E, () => { const I = window.__ink, s = I.game.ctx.level.startPoint; I.teleport(s.x, s.y, s.z); });
   const cdp2 = await E.ctx.newCDPSession(E.page);
   await run(A, () => {
     const G = window.__ink.game;
@@ -804,14 +862,16 @@ await sleep(2000);
   // p3p2's button: not there in a run, where every corner is the HUD's; back on the pause
   // screen, which has no PLAY WITH FRIENDS of its own, and opening the same panel
   const inRunBox = await pill(F);
-  await run(F, () => window.__ink.game.pause());
+  // to the pause screen as a thumb gets there: PAUSE, along the top
+  await F.page.locator('.touch [data-a="pause"]').tap();
   await sleep(300);
+  const paused = await run(F, () => window.__ink.game.state);
   const pausedBox = await pill(F);
   const ours = await F.page.locator('[data-a="friends"]').count();
   await F.page.getByRole('button', { name: /^Multiplayer/ }).tap();
   const again = await card.waitFor({ timeout: 5000 }).then(() => true, () => false);
-  check('a phone: 👥 hidden in a run, on the pause opens the panel', !inRunBox && !!pausedBox && !ours && again,
-    `in a run ${inRunBox ? 'drawn' : 'not drawn'}; paused ${pausedBox ? `${pausedBox.w}x${pausedBox.h} at (${pausedBox.x}, ${pausedBox.y})` : 'not drawn'}, PLAY WITH FRIENDS ${ours ? 'there' : 'not there'}, panel ${again ? 'opened' : 'not opened'}`);
+  check('a phone: 👥 hidden in a run, on the pause opens the panel', !inRunBox && paused === 'paused' && !!pausedBox && !ours && again,
+    `in a run ${inRunBox ? 'drawn' : 'not drawn'}; PAUSE tapped: ${paused}, 👥 ${pausedBox ? `${pausedBox.w}x${pausedBox.h} at (${pausedBox.x}, ${pausedBox.y})` : 'not drawn'}, PLAY WITH FRIENDS ${ours ? 'there' : 'not there'}, panel ${again ? 'opened' : 'not opened'}`);
   await F.ctx.close();
 }
 

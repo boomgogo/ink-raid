@@ -360,8 +360,13 @@ html:not(.ir-playing) :is(#irRun, .touch) { visibility: hidden; }
 #hud.ir-touch .ir-feed { top: calc(62px + 7vh); }
 #hud.ir-touch .ir-edge { left: 108px; }
 #hud.ir-touch .ir-br { bottom: 46vh; }
+/* The boss bar is centred along the top, which the row reaches on a phone. Upright it goes down
+   under the row, between the left INK and the wave readout; on its side it stays up, narrowed to
+   stop short of the row (450px: the row's 214px from the right edge, mirrored, and a gap). */
+#hud.ir-touch .ir-boss { top: 62px; }
 @media (orientation: landscape) {
   #hud.ir-touch .ir-br { bottom: 2.4vh; right: 228px; }
+  #hud.ir-touch .ir-boss { top: 1.6vh; width: min(46vw, 420px, calc(100vw - 450px)); }
 }
 
 /* ==================================================================== touch */
@@ -394,7 +399,7 @@ html:not(.ir-playing) :is(#irRun, .touch) { visibility: hidden; }
 }
 .tfire.down { background: var(--ir-danger); color: var(--ir-paper); }
 
-/* the row along the top: LOAD, NEXT, WRAP */
+/* the row along the top: LOAD, NEXT, WRAP, PAUSE */
 .tsmall { font-size: 9px; }
 
 .theal { display: none; border-color: var(--ir-accent); color: var(--ir-accent); }
